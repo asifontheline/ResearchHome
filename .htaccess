@@ -1,0 +1,6 @@
+# Block direct access to sensitive files
+<FilesMatch "^(config\.php|create_admin\.php)$">
+    Require all denied
+</FilesMatch>
+
+Options -Indexes
