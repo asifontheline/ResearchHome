@@ -286,6 +286,8 @@ nav { display: flex; gap: 1rem; }
   max-width: 640px;
 }
 .item-form label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.9rem; color: var(--muted); }
+.item-form label.checkbox-label { flex-direction: row; align-items: center; gap: 0.5rem; }
+.item-form label.checkbox-label input[type="checkbox"] { width: auto; }
 .item-form input, .item-form textarea {
   padding: 0.5rem 0.6rem;
   border-radius: 6px;

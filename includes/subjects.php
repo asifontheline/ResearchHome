@@ -61,6 +61,7 @@ return [
     // Humanities & Law
     'law' => ['label' => 'Law', 'parent' => 'Humanities & Law', 'keywords' => ['law', 'legal', 'legislation', 'regulation', 'jurisprudence']],
     'education' => ['label' => 'Education', 'parent' => 'Humanities & Law', 'keywords' => ['education', 'pedagogy', 'learning outcomes', 'curriculum']],
+    'dissertations-theses' => ['label' => 'Dissertations & Theses', 'parent' => 'Humanities & Law', 'keywords' => ['dissertation', 'thesis', 'theses', 'doctoral thesis', 'phd thesis']],
     'linguistics' => ['label' => 'Linguistics', 'parent' => 'Humanities & Law', 'keywords' => ['linguistics', 'natural language', 'phonetics', 'syntax']],
     'history' => ['label' => 'History', 'parent' => 'Humanities & Law', 'keywords' => ['history', 'historical', 'archaeology']],
     'philosophy' => ['label' => 'Philosophy', 'parent' => 'Humanities & Law', 'keywords' => ['philosophy', 'ethics', 'epistemology', 'metaphysics']],

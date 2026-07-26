@@ -15,6 +15,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $publishedDate = trim($_POST['published_date'] ?? '');
     $imageUrl = trim($_POST['image_url'] ?? '');
     $tagsCsv = trim($_POST['tags'] ?? '');
+    $addAsSeed = isset($_POST['add_as_seed']);
+    $seedSubjectSlug = trim($_POST['seed_subject_slug'] ?? '') ?: null;
 
     if ($title === '') $errors[] = 'Title is required.';
     if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL)) $errors[] = 'A valid URL is required.';
@@ -30,11 +32,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($itemId === null) {
             $errors[] = 'An item with this URL already exists.';
         } else {
+            if ($addAsSeed) {
+                $host = parse_url($url, PHP_URL_HOST);
+                if ($host) {
+                    db()->prepare(
+                        'INSERT IGNORE INTO seed_urls (url, host, subject_slug, active) VALUES (?, ?, ?, 1)'
+                    )->execute([$url, $host, $seedSubjectSlug]);
+                }
+            }
             header('Location: /item.php?id=' . $itemId);
             exit;
         }
     }
 }
+
+$subjects = require __DIR__ . '/includes/subjects.php';
 
 $pageTitle = 'Add item';
 require __DIR__ . '/includes/header.php';
@@ -87,9 +99,32 @@ require __DIR__ . '/includes/header.php';
     <input type="text" name="tags" value="<?= h($_POST['tags'] ?? '') ?>">
   </label>
 
+  <label class="checkbox-label">
+    <input type="checkbox" name="add_as_seed" value="1" id="add_as_seed" <?= isset($_POST['add_as_seed']) ? 'checked' : '' ?>>
+    Also add this URL as a crawl seed — the harvester will explore outbound links from it on future runs
+  </label>
+
+  <label id="seed_subject_row" style="display: none;">Seed subject <span class="muted">(optional — for classifying items the crawler discovers here)</span>
+    <select name="seed_subject_slug">
+      <option value="">— none —</option>
+      <?php foreach ($subjects as $slug => $def): ?>
+        <option value="<?= h($slug) ?>" <?= ($_POST['seed_subject_slug'] ?? '') === $slug ? 'selected' : '' ?>><?= h($def['label']) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </label>
+
   <button type="submit">Save item</button>
 </form>
 
+<script>
+(function () {
+  var checkbox = document.getElementById('add_as_seed');
+  var row = document.getElementById('seed_subject_row');
+  function sync() { row.style.display = checkbox.checked ? '' : 'none'; }
+  checkbox.addEventListener('change', sync);
+  sync();
+})();
+</script>
 <script src="/assets/app.js"></script>
 
 <?php require __DIR__ . '/includes/footer.php'; ?>
