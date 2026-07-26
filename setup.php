@@ -23,10 +23,10 @@ if ($userCount > 0) {
 }
 ?>
 <!doctype html>
-<html><head><meta charset="utf-8"><title>ResearchHome setup</title>
+<html><head><meta charset="utf-8"><title>ResHub setup</title>
 <link rel="stylesheet" href="/assets/style.css"></head>
 <body><main class="container narrow">
-<h1>ResearchHome setup</h1>
+<h1>ResHub setup</h1>
 
 <?php if ($done): ?>
   <p class="success">Admin user created. <strong>Now delete setup.php from the server.</strong></p>

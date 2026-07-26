@@ -9,7 +9,7 @@ require __DIR__ . '/includes/header.php';
 <h1>Credits</h1>
 
 <div class="callout">
-  <strong>Nothing is copied here.</strong> ResearchHome stores only metadata —
+  <strong>Nothing is copied here.</strong> ResHub (Research Hub) stores only metadata —
   title, authors, a short abstract, publication date — plus a link back to
   where each item actually lives. No full text, no paywalled content, no
   bypassing of access controls. This is a personal, non-commercial research

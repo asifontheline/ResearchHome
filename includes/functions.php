@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/db.php';
 
-const HARVEST_USER_AGENT_BASE = 'ResearchHomeBot/1.0 (+personal research catalog; respects robots.txt)';
+const HARVEST_USER_AGENT_BASE = 'ResHubBot/1.0 (+personal research catalog; respects robots.txt)';
 define('HARVEST_USER_AGENT', HARVEST_USER_AGENT_BASE . (defined('CONTACT_EMAIL') && CONTACT_EMAIL !== 'you@example.com' ? '; contact: ' . CONTACT_EMAIL : ''));
 
 function slugify(string $text): string {
@@ -425,7 +425,7 @@ function safe_http_get(string $url, array $headers = []): ?string {
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS => 5,
         CURLOPT_TIMEOUT => 15,
-        CURLOPT_USERAGENT => 'ResearchHome/1.0 (+metadata fetcher)',
+        CURLOPT_USERAGENT => 'ResHub/1.0 (+metadata fetcher)',
         CURLOPT_HTTPHEADER => $headers,
     ]);
     $body = curl_exec($ch);

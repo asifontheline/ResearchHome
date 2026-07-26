@@ -10,9 +10,11 @@ require __DIR__ . '/includes/header.php';
 ?>
 
 <p class="project-description">
-  ResearchHome automatically discovers and catalogs freely available research — papers, patents,
-  and articles — from arXiv, Crossref, PubMed, OpenAlex, and more, several times an hour.
-  Nothing here is copied; every item is metadata plus a link back to its original source.
+  ResHub (Research Hub) automatically discovers and catalogs freely available research — papers,
+  patents, and articles — from arXiv, Crossref, PubMed, OpenAlex, and more, several times an hour.
+  Nothing here is copied; every item is metadata plus a link back to its original source. This is a
+  dynamic website that discovers newly available information and adds it every hour — keep checking
+  in and discover more!
 </p>
 
 <h1>Items added, last 30 days</h1>

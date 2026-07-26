@@ -1,6 +1,6 @@
 # Contributing
 
-ResearchHome is AGPL-3.0 — you're free to fork and run your own instance.
+ResHub (Research Hub) is AGPL-3.0 — you're free to fork and run your own instance.
 If you improve something, contributions back upstream are genuinely welcome,
 not just legally invited.
 

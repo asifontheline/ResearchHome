@@ -1,4 +1,4 @@
-# ResearchHome — Design Document
+# ResHub (Research Hub) — Design Document
 
 ## 1. Goal
 
