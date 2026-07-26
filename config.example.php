@@ -7,6 +7,13 @@ define('DB_NAME', 'researchhome');
 define('DB_USER', 'root');
 define('DB_PASS', '');
 
+// Optional: if your host provides a MySQL Unix socket path (check your
+// panel's database connection info — often /run/mysqld/mysqld.sock or
+// /var/lib/mysql/mysql.sock) and the app runs on the same server as the
+// database, this is faster/more reliable than DB_HOST/TCP. Leave blank to
+// use DB_HOST instead.
+define('DB_SOCKET', '');
+
 // Used for admin login sessions. Change this to a random string.
 define('APP_SECRET', 'change-this-to-a-long-random-string');
 

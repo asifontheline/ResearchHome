@@ -17,11 +17,11 @@ cPanel shared hosting (tested against a MilesWeb Premium plan). See
 
 ## Local scheduling (until deployed)
 
-Before this is deployed to MilesWeb (where cPanel Cron Jobs takes over —
+Before this is deployed to MilesWeb (where mPanel Cron Jobs takes over —
 see step 6 below), two macOS LaunchAgents run the harvester locally:
 
 ```
-~/Library/LaunchAgents/com.researchhome.harvest.plist    every 15 min  → harvest.php
+~/Library/LaunchAgents/com.researchhome.harvest.plist    every 1 hour  → harvest.php
 ~/Library/LaunchAgents/com.researchhome.discover.plist   every 30 min  → discover.php
 ```
 
@@ -47,8 +47,9 @@ sql/schema.sql         Run this once in phpMyAdmin to create tables
 setup.php              One-time web page to create your admin login (delete after use)
 create_admin.php       CLI alternative to setup.php, if you have SSH/terminal
 index.php / item.php   Browse / search / filter by tag, single item view
-harvest.php            Harvester entrypoint — run by cron, or on-demand from harvest_log.php
-seeds.php              Admin: manage crawler seed/hub URLs
+harvest.php            Content harvest entrypoint — run by cron, or on-demand from harvest_log.php
+discover.php           Source-discovery entrypoint — separate cron/cadence from harvest.php
+seeds.php              Admin: manage crawler seed/hub URLs (incl. discovered-seed review)
 harvest_log.php        Admin: harvest run history + "Run harvest now"
 add.php / edit.php     Manual add/edit — a fallback path, not the normal workflow
 delete.php             Delete an item (POST only, admin only)
@@ -87,19 +88,42 @@ backups/               mysqldump snapshots (gitignored equivalent — .htaccess-
    it refuses to run again once a user exists, but there's no reason to leave
    it up.
 
-6. **Set up the cron job.**
-   cPanel → *Cron Jobs* → add a new job:
+6. **Set up two cron jobs — content harvest and source discovery are separate.**
+   MilesWeb's control panel is **mPanel** (`my.milesweb.com` → *My Services* →
+   your hosting package → *Login to mPanel* → *Cron Jobs* → *Add Cron Job*).
+   Per MilesWeb support, the command needs the PHP binary's **absolute path**
+   (not just `php`) and should redirect output to a log file — cron runs in
+   a stripped-down environment where relative paths and `$PATH` assumptions
+   can silently fail:
    ```
-   Command:  php /home/YOURUSER/public_html/PATH/harvest.php
-   Schedule: every 1 hour (or whatever cadence you like)
+   Command:  /usr/bin/php /home/YOURUSER/public_html/PATH/harvest.php >> /home/YOURUSER/public_html/PATH/logs/harvest.log 2>&1
+   Schedule: 0 * * * *          (every hour)
+
+   Command:  /usr/bin/php /home/YOURUSER/public_html/PATH/discover.php >> /home/YOURUSER/public_html/PATH/logs/discover.log 2>&1
+   Schedule: */30 * * * *       (every 30 minutes)
    ```
-   Each run rotates through **one** subject across all 6 sources (not the
-   whole 30+-subject list — see `DESIGN.md` §4.3/§5 for why), crawls one due
-   seed hub page, processes a batch of the discovered-link queue, and
+   `/usr/bin/php` is MilesWeb's documented example — if your account has a
+   specific PHP version selected, confirm the actual path (SSH: `which php`,
+   or ask MilesWeb support) before relying on it; a wrong path fails silently
+   under cron even though the same command works fine typed manually.
+   `logs/` already exists in this repo with an `.htaccess` blocking web
+   access, so logging cron output there is safe.
+
+   `harvest.php` rotates through **one** subject across all 6 sources (not
+   the whole 30+-subject list — see `DESIGN.md` §4.3/§5 for why), crawls one
+   due seed hub page, processes a batch of the discovered-link queue, and
    verifies a batch of existing items are still reachable (removing dead
    links). Full subject coverage happens across many runs, by design — this
    keeps each cron invocation (measured locally at ~30s worst case with all
    6 sources) well under typical shared-hosting PHP execution-time limits.
+   Each of the 6 content sources also self-throttles to at most once per
+   hour regardless of cron cadence, so a shorter schedule here just wastes
+   invocations rather than over-fetching — hourly is the right cadence.
+
+   `discover.php` only proposes new seeds (see step 7) — no content
+   fetching — and self-throttles to once per 24h internally, so running it
+   every 30 minutes just means a new source gets picked up promptly once a
+   day rather than fetching anything more often than that.
 
 7. **Add a few seed URLs — or let the harvester find them.**
    Log in → *Seeds* → add hub/listing pages yourself (e.g. an arXiv category
