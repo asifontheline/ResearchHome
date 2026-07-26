@@ -38,9 +38,10 @@ require_once __DIR__ . '/functions.php';
         <a href="/seeds.php">Seeds</a>
         <a href="/add.php">+ Add</a>
         <a href="/logout.php">Log out</a>
-      <?php else: ?>
-        <a href="/login.php">Log in</a>
       <?php endif; ?>
+      <?php /* No public "Log in" link — this is a single-admin site, not a
+               multi-user app; showing it to visitors implied accounts exist.
+               /login.php still works directly for the admin. */ ?>
     </nav>
   </div>
 </header>
