@@ -51,7 +51,7 @@ function paginate_url(int $page, string $q, string $tagSlug): string {
 $pageTitle = 'Browse';
 require __DIR__ . '/includes/header.php';
 
-$tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely available research — papers, patents, and articles — from arXiv, Crossref, PubMed, OpenAlex, and more, several times an hour. Nothing here is copied; every item is metadata plus a link back to its original source. This is a dynamic website that discovers newly available information and adds it every hour — keep checking in and discover more!';
+$tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely available research — papers, patents, and articles — from arXiv, Crossref, PubMed, OpenAlex, and more. Hourly harvest, with a discovery phase every half hour looking for new sources. This is a dynamic website that discovers newly available information and adds it every hour — keep checking in and discover more!';
 ?>
 
 <div class="ticker" role="note" aria-label="About ResHub">
