@@ -170,11 +170,15 @@ function subject_label(?string $slug): string {
  * each annotated with its live item count.
  *
  * Tags outside subjects.php (arXiv category codes, Crossref subject
- * strings, ad-hoc manual tags, ...) are NOT surfaced as an ever-growing
- * "other tags" pile. Instead:
+ * strings, OpenAlex topic names, ad-hoc manual tags, ...) are NOT surfaced
+ * as an ever-growing pile of individually-named pills — a page full of
+ * one-off source-classification strings reads as noise, not navigation.
+ * Instead:
  *  - ones that have accumulated more than OTHER_TAG_PROMOTION_THRESHOLD
- *    items graduate into their own visible "Emerging Topics" group —
- *    they've proven common enough to be a real subject, not noise.
+ *    items are real signal, not noise — but only the top
+ *    SPECIALIZED_TOPICS_SHOWN of those get their own named pill. Everything
+ *    past that folds into a single "+N more" link to the full tag
+ *    directory (tags.php) rather than fragmenting the subject bar further.
  *  - everything at or below the threshold is dropped from display
  *    entirely. Those items aren't lost — insert_item_if_new() always
  *    tags an item with a real curated/classified subject alongside any
@@ -182,6 +186,7 @@ function subject_label(?string $slug): string {
  *    subject tag the item already carries.
  */
 const OTHER_TAG_PROMOTION_THRESHOLD = 2;
+const SPECIALIZED_TOPICS_SHOWN = 2;
 
 function get_grouped_subjects(): array {
     $subjects = require __DIR__ . '/subjects.php';
@@ -201,18 +206,21 @@ function get_grouped_subjects(): array {
     }
 
     $knownSlugs = array_keys($subjects);
-    $emerging = [];
+    $specialized = [];
     foreach (all_tags_with_counts() as $t) {
         if (!in_array($t['slug'], $knownSlugs, true) && (int) $t['item_count'] > OTHER_TAG_PROMOTION_THRESHOLD) {
-            $emerging[] = ['slug' => $t['slug'], 'label' => $t['name'], 'count' => (int) $t['item_count']];
+            $specialized[] = ['slug' => $t['slug'], 'label' => $t['name'], 'count' => (int) $t['item_count']];
         }
     }
-    if ($emerging) {
-        usort($emerging, fn($a, $b) => $b['count'] <=> $a['count']);
-        $groups['Emerging Topics'] = $emerging;
+    usort($specialized, fn($a, $b) => $b['count'] <=> $a['count']);
+
+    $overflowCount = 0;
+    if ($specialized) {
+        $overflowCount = max(0, count($specialized) - SPECIALIZED_TOPICS_SHOWN);
+        $groups['Specialized Topics'] = array_slice($specialized, 0, SPECIALIZED_TOPICS_SHOWN);
     }
 
-    return ['groups' => $groups];
+    return ['groups' => $groups, 'overflow_count' => $overflowCount];
 }
 
 /**

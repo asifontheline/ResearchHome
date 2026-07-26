@@ -67,6 +67,10 @@ require __DIR__ . '/includes/header.php';
       </div>
     </div>
   <?php endforeach; ?>
+
+  <?php if ($grouped['overflow_count'] > 0): ?>
+    <a class="tags-overflow-link" href="/tags.php">+<?= $grouped['overflow_count'] ?> more specialized topics &rarr;</a>
+  <?php endif; ?>
 </nav>
 
 <section class="content">

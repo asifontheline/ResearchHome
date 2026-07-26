@@ -30,6 +30,8 @@ require_once __DIR__ . '/functions.php';
     </table>
     <nav>
       <a href="https://github.com/asifontheline/ResearchHome" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="/activity.php">Activity</a>
+      <a href="/tags.php">Tags</a>
       <a href="/credits.php">Credits</a>
       <?php if (current_user()): ?>
         <a href="/harvest_log.php">Harvest log</a>

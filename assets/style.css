@@ -147,9 +147,23 @@ nav { display: flex; gap: 1rem; }
 }
 .tag-pill .count { color: var(--muted); font-size: 0.75rem; }
 
-.other-tags { margin-top: 0.5rem; text-align: center; }
-.other-tags summary { cursor: pointer; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
-.other-tags .subject-pills { margin-top: 0.6rem; }
+.tags-overflow-link {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.tags-overflow-link:hover { color: var(--accent); }
+
+.tags-directory { justify-content: flex-start; max-width: none; }
+
+.project-description {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  max-width: 70ch;
+  margin: 0 0 1.5rem;
+}
 
 .filter-summary { color: var(--muted); margin-bottom: 1rem; text-align: center; }
 .result-count { color: var(--muted); font-size: 0.85rem; margin-bottom: 1rem; text-align: center; }
