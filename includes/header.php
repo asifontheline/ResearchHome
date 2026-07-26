@@ -29,6 +29,7 @@ require_once __DIR__ . '/functions.php';
       <?php endif; ?>
     </table>
     <nav>
+      <a href="https://github.com/asifontheline/ResearchHome" target="_blank" rel="noopener noreferrer">GitHub</a>
       <a href="/credits.php">Credits</a>
       <?php if (current_user()): ?>
         <a href="/harvest_log.php">Harvest log</a>

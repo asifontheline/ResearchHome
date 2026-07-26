@@ -152,6 +152,31 @@ nav { display: flex; gap: 1rem; }
 .other-tags .subject-pills { margin-top: 0.6rem; }
 
 .filter-summary { color: var(--muted); margin-bottom: 1rem; text-align: center; }
+.result-count { color: var(--muted); font-size: 0.85rem; margin-bottom: 1rem; text-align: center; }
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+}
+.pagination a, .pagination span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  padding: 0 0.5rem;
+  border-radius: 6px;
+}
+.pagination a { border: 1px solid var(--border); color: var(--text); }
+.pagination a:hover { border-color: var(--accent); text-decoration: none; }
+.pagination-current { background: var(--accent); color: #0f1115; font-weight: 600; }
+.pagination-disabled { color: var(--muted); }
+.pagination-ellipsis { color: var(--muted); }
 
 .item-grid {
   display: grid;

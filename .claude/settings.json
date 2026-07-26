@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(crontab -l)",
+      "Read(//Users/apple/Library/LaunchAgents/**)",
+      "Bash(launchctl list *)",
+      "Bash(cat ~/Library/LaunchAgents/com.researchhome.harvest.plist)",
+      "Bash(launchctl unload *)",
+      "Bash(launchctl load *)",
+      "Bash(plutil -p ~/Library/LaunchAgents/com.researchhome.harvest.plist)",
+      "Bash(php -l /Users/apple/Desktop/ResearchHome/includes/header.php)",
+      "Bash(curl -s http://localhost:8099/index.php -o /tmp/gh_link_test.html -w \"%{http_code}\\\\n\")"
+    ],
+    "additionalDirectories": [
+      "/Users/apple/Library/LaunchAgents"
+    ]
+  }
+}

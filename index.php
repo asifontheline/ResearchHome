@@ -4,13 +4,14 @@ require_once __DIR__ . '/includes/auth.php';
 
 $q = trim($_GET['q'] ?? '');
 $tagSlug = trim($_GET['tag'] ?? '');
+$perPage = 24;
 
-$sql = 'SELECT DISTINCT i.* FROM items i';
+$joinClause = '';
 $params = [];
 $where = [];
 
 if ($tagSlug !== '') {
-    $sql .= ' JOIN item_tags it ON it.item_id = i.id JOIN tags t ON t.id = it.tag_id';
+    $joinClause = ' JOIN item_tags it ON it.item_id = i.id JOIN tags t ON t.id = it.tag_id';
     $where[] = 't.slug = ?';
     $params[] = $tagSlug;
 }
@@ -20,16 +21,32 @@ if ($q !== '') {
     $params[] = $q;
 }
 
-if ($where) {
-    $sql .= ' WHERE ' . implode(' AND ', $where);
-}
-$sql .= ' ORDER BY i.added_at DESC LIMIT 200';
+$whereClause = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+
+$countStmt = db()->prepare("SELECT COUNT(DISTINCT i.id) FROM items i{$joinClause}{$whereClause}");
+$countStmt->execute($params);
+$totalItems = (int) $countStmt->fetchColumn();
+$totalPages = max(1, (int) ceil($totalItems / $perPage));
+
+$page = max(1, min($totalPages, (int) ($_GET['page'] ?? 1)));
+$offset = ($page - 1) * $perPage;
+
+$sql = "SELECT DISTINCT i.* FROM items i{$joinClause}{$whereClause}
+        ORDER BY i.added_at DESC LIMIT {$perPage} OFFSET {$offset}";
 
 $stmt = db()->prepare($sql);
 $stmt->execute($params);
 $items = $stmt->fetchAll();
 
 $grouped = get_grouped_subjects();
+
+/** Builds a pagination link preserving the current q/tag filters. */
+function paginate_url(int $page, string $q, string $tagSlug): string {
+    $params = ['page' => $page];
+    if ($q !== '') $params['q'] = $q;
+    if ($tagSlug !== '') $params['tag'] = $tagSlug;
+    return '/index.php?' . http_build_query($params);
+}
 
 $pageTitle = 'Browse';
 require __DIR__ . '/includes/header.php';
@@ -61,6 +78,13 @@ require __DIR__ . '/includes/header.php';
     </p>
   <?php endif; ?>
 
+  <?php if ($totalItems > 0): ?>
+    <p class="result-count">
+      <?= number_format($totalItems) ?> item<?= $totalItems === 1 ? '' : 's' ?>
+      <?php if ($totalPages > 1): ?> — page <?= $page ?> of <?= number_format($totalPages) ?><?php endif; ?>
+    </p>
+  <?php endif; ?>
+
   <?php if (!$items): ?>
     <p class="empty-state">Nothing here yet. <?php if (current_user()): ?><a href="/add.php">Add your first item</a>.<?php endif; ?></p>
   <?php endif; ?>
@@ -87,6 +111,44 @@ require __DIR__ . '/includes/header.php';
       </article>
     <?php endforeach; ?>
   </div>
+
+  <?php if ($totalPages > 1): ?>
+    <nav class="pagination" aria-label="Pagination">
+      <?php if ($page > 1): ?>
+        <a href="<?= h(paginate_url($page - 1, $q, $tagSlug)) ?>">&laquo; Prev</a>
+      <?php else: ?>
+        <span class="pagination-disabled">&laquo; Prev</span>
+      <?php endif; ?>
+
+      <?php
+        $windowStart = max(1, $page - 2);
+        $windowEnd = min($totalPages, $page + 2);
+      ?>
+      <?php if ($windowStart > 1): ?>
+        <a href="<?= h(paginate_url(1, $q, $tagSlug)) ?>">1</a>
+        <?php if ($windowStart > 2): ?><span class="pagination-ellipsis">&hellip;</span><?php endif; ?>
+      <?php endif; ?>
+
+      <?php for ($p = $windowStart; $p <= $windowEnd; $p++): ?>
+        <?php if ($p === $page): ?>
+          <span class="pagination-current"><?= $p ?></span>
+        <?php else: ?>
+          <a href="<?= h(paginate_url($p, $q, $tagSlug)) ?>"><?= $p ?></a>
+        <?php endif; ?>
+      <?php endfor; ?>
+
+      <?php if ($windowEnd < $totalPages): ?>
+        <?php if ($windowEnd < $totalPages - 1): ?><span class="pagination-ellipsis">&hellip;</span><?php endif; ?>
+        <a href="<?= h(paginate_url($totalPages, $q, $tagSlug)) ?>"><?= number_format($totalPages) ?></a>
+      <?php endif; ?>
+
+      <?php if ($page < $totalPages): ?>
+        <a href="<?= h(paginate_url($page + 1, $q, $tagSlug)) ?>">Next &raquo;</a>
+      <?php else: ?>
+        <span class="pagination-disabled">Next &raquo;</span>
+      <?php endif; ?>
+    </nav>
+  <?php endif; ?>
 </section>
 
 <?php require __DIR__ . '/includes/footer.php'; ?>
