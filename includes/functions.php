@@ -58,6 +58,22 @@ function get_item_tags(int $itemId): array {
     return $stmt->fetchAll();
 }
 
+/**
+ * Every distinct source_name with a successful item in the catalog —
+ * i.e. every source we've actually pulled content from, not just the 6
+ * core API mechanisms that do the pulling. Matches the "Sources" count in
+ * get_catalog_summary() exactly (both count DISTINCT source_name on items).
+ */
+function all_contributing_sources(): array {
+    return db()->query(
+        "SELECT source_name, COUNT(*) AS item_count
+         FROM items
+         WHERE source_name IS NOT NULL
+         GROUP BY source_name
+         ORDER BY item_count DESC, source_name ASC"
+    )->fetchAll();
+}
+
 function all_tags_with_counts(): array {
     return db()->query(
         'SELECT t.id, t.name, t.slug, COUNT(it.item_id) AS item_count

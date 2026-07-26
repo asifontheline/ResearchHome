@@ -2,6 +2,8 @@
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
 
+$sources = all_contributing_sources();
+
 $pageTitle = 'Credits';
 require __DIR__ . '/includes/header.php';
 ?>
@@ -19,8 +21,8 @@ require __DIR__ . '/includes/header.php';
 </div>
 
 <p class="muted">
-  Sources are listed below in the order the harvester queries them each run
-  (see <code>includes/harvester.php</code>).
+  These 6 free APIs are how content is <em>found</em> — listed in the order
+  the harvester queries them each run (see <code>includes/harvester.php</code>).
 </p>
 
 <ol class="credits-list">
@@ -57,6 +59,19 @@ require __DIR__ . '/includes/header.php';
   of journals and repositories, and flagging pages the crawler encounters that
   look like listing/index pages on a domain it's never touched before.
 </p>
+
+<h2>Every publisher &amp; repository represented (<?= count($sources) ?>)</h2>
+<p class="muted">
+  The 6 APIs above find content, but the content itself comes from wherever it
+  was actually published — journals, university repositories, preprint
+  servers. Every one of those gets credited here too, not just the discovery
+  mechanism, with a live count of how many items in the catalog came from each:
+</p>
+<div class="subject-pills tags-directory">
+  <?php foreach ($sources as $s): ?>
+    <span class="tag-pill" style="cursor: default;"><?= h($s['source_name']) ?> <span class="count"><?= (int)$s['item_count'] ?></span></span>
+  <?php endforeach; ?>
+</div>
 
 <h2>Infrastructure</h2>
 <p class="muted">Built with PHP and MySQL. No tracking, no ads, no accounts beyond a single admin login for the person running this instance.</p>
