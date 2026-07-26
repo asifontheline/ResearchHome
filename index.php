@@ -50,7 +50,16 @@ function paginate_url(int $page, string $q, string $tagSlug): string {
 
 $pageTitle = 'Browse';
 require __DIR__ . '/includes/header.php';
+
+$tickerText = 'ResearchHome automatically discovers and catalogs freely available research — papers, patents, and articles — from arXiv, Crossref, PubMed, OpenAlex, and more, several times an hour. Nothing here is copied; every item is metadata plus a link back to its original source.';
 ?>
+
+<div class="ticker" role="note" aria-label="About ResearchHome">
+  <div class="ticker-track">
+    <span><?= h($tickerText) ?></span>
+    <span aria-hidden="true"><?= h($tickerText) ?></span>
+  </div>
+</div>
 
 <nav class="subject-bar">
   <a class="all-link <?= $tagSlug === '' ? 'active' : '' ?>" href="/index.php">All items</a>

@@ -103,6 +103,36 @@ nav { display: flex; gap: 1rem; }
 
 .content { min-width: 0; }
 
+/* Continuous auto-scrolling ticker with the project description, homepage only */
+.ticker {
+  overflow: hidden;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 0.6rem 0;
+  margin-bottom: 1.5rem;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent);
+          mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent);
+}
+.ticker-track {
+  display: inline-flex;
+  animation: ticker-scroll 32s linear infinite;
+}
+.ticker-track span {
+  padding-right: 4rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track { animation: none; }
+  .ticker { overflow-x: auto; }
+}
+
 /* Centered, wrapping subject bar (replaces the old left sidebar) */
 .subject-bar {
   display: flex;
