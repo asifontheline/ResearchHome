@@ -29,6 +29,7 @@ require_once __DIR__ . '/functions.php';
       <?php endif; ?>
     </table>
     <nav>
+      <a href="/index.php">Home</a>
       <a href="/activity.php">Activity</a>
       <a href="/tags.php">Tags</a>
       <a href="/credits.php">Credits</a>
