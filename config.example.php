@@ -34,3 +34,8 @@ define('PATENTSVIEW_API_KEY', '');
 // is shared globally and 429s often). Free self-serve key at
 // https://www.semanticscholar.org/product/api#api-key-form — works without it too.
 define('SEMANTIC_SCHOLAR_API_KEY', '');
+
+// Optional: if set, monitor.php (run hourly via its own mPanel cron job)
+// emails a status digest here every run — catalog totals, recent harvest/
+// discovery runs, and any stuck or errored runs. Leave blank to disable.
+define('MONITOR_EMAIL', '');

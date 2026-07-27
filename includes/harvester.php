@@ -869,3 +869,85 @@ function run_source_discovery(): array {
         'errors' => $errors,
     ];
 }
+
+// ---- Monitoring: hourly email digest -------------------------------------
+
+/**
+ * A run counts as "stuck" if it's been unfinished for longer than any real
+ * run should ever take — set_time_limit(240) in harvest.php means a normal
+ * run can't legitimately still be going after this long, so past this
+ * threshold it's a crash that somehow still left finished_at NULL, not a
+ * slow-but-healthy run.
+ */
+const MONITOR_STUCK_THRESHOLD_MINUTES = 15;
+
+function build_monitor_report(): array {
+    $summary = get_catalog_summary();
+    $recentRuns = db()->query(
+        'SELECT * FROM harvest_log ORDER BY started_at DESC LIMIT 10'
+    )->fetchAll();
+    $stuckRuns = db()->query(
+        "SELECT * FROM harvest_log WHERE finished_at IS NULL
+         AND started_at < DATE_SUB(NOW(), INTERVAL " . MONITOR_STUCK_THRESHOLD_MINUTES . " MINUTE)
+         ORDER BY started_at DESC"
+    )->fetchAll();
+
+    // No harvest run at all in the last 2 hours means the cron job itself
+    // likely isn't firing (misconfigured path, disabled, host issue) —
+    // catches a failure mode no per-run check inside the script can see.
+    $lastHarvest = db()->query(
+        "SELECT started_at FROM harvest_log WHERE run_type = 'harvest' ORDER BY started_at DESC LIMIT 1"
+    )->fetchColumn();
+    $harvestCronLikelyDown = !$lastHarvest || strtotime($lastHarvest) < strtotime('-2 hours');
+
+    $lines = [];
+    $lines[] = "ResHub status digest — " . date('Y-m-d H:i:s') . ' server time';
+    $lines[] = str_repeat('=', 60);
+    $lines[] = '';
+    $lines[] = "Catalog: {$summary['total_items']} items, {$summary['total_tags']} tags, {$summary['total_sources']} sources";
+    $lines[] = '';
+
+    if ($stuckRuns) {
+        $lines[] = "⚠ STUCK RUNS (unfinished for over " . MONITOR_STUCK_THRESHOLD_MINUTES . " min):";
+        foreach ($stuckRuns as $r) {
+            $lines[] = "  - #{$r['id']} {$r['run_type']} started {$r['started_at']}, never finished";
+        }
+        $lines[] = '';
+    }
+
+    if ($harvestCronLikelyDown) {
+        $lines[] = "⚠ NO HARVEST RUN IN OVER 2 HOURS (last: " . ($lastHarvest ?: 'never') . ") — check the mPanel cron job is still active.";
+        $lines[] = '';
+    }
+
+    $lines[] = 'Last 10 runs:';
+    foreach ($recentRuns as $r) {
+        $status = $r['finished_at'] === null ? 'UNFINISHED' : 'ok';
+        $lines[] = sprintf(
+            '  #%d %-9s %s -> %s [%s] items=%d errors=%d',
+            $r['id'], $r['run_type'], $r['started_at'],
+            $r['finished_at'] ?? '?', $status, $r['items_added'], $r['errors']
+        );
+        if ($r['errors'] > 0 && $r['detail']) {
+            $firstLine = strtok($r['detail'], "\n");
+            $lines[] = "      -> {$firstLine}";
+        }
+    }
+
+    $hasProblem = (bool) $stuckRuns || $harvestCronLikelyDown;
+    $subject = ($hasProblem ? '[ATTENTION] ' : '') . "ResHub status — {$summary['total_items']} items";
+
+    return ['subject' => $subject, 'body' => implode("\n", $lines), 'has_problem' => $hasProblem];
+}
+
+function send_monitor_report(): bool {
+    if (!defined('MONITOR_EMAIL') || !MONITOR_EMAIL) {
+        return false;
+    }
+    $report = build_monitor_report();
+    $fromDomain = defined('CONTACT_EMAIL') && str_contains(CONTACT_EMAIL, '@')
+        ? substr(CONTACT_EMAIL, strpos(CONTACT_EMAIL, '@') + 1)
+        : 'localhost';
+    $headers = "From: ResHub Monitor <noreply@{$fromDomain}>\r\nContent-Type: text/plain; charset=UTF-8";
+    return mail(MONITOR_EMAIL, $report['subject'], $report['body'], $headers);
+}
