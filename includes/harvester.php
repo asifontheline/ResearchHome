@@ -581,7 +581,33 @@ function discover_new_seeds(): array {
  */
 const SEED_FAILURE_THRESHOLD = 3;
 
+/**
+ * Auto-disabled is not permanent — a seed can fail 3x for a transient
+ * reason (temporary outage, momentary rate-limit) as easily as a permanent
+ * one (bot-protection). After this cooldown it gets one more chance
+ * automatically rather than needing a manual re-enable in seeds.php.
+ * discovered=0 in the WHERE clause is deliberate: seeds pending admin
+ * review (discovered=1, active=0) must stay inactive until approved —
+ * this only ever touches seeds that were active and got disabled by
+ * repeated failure, not ones that were never approved in the first place.
+ */
+const SEED_COOLDOWN_HOURS = 24;
+
+function reactivate_cooled_down_seeds(): int {
+    $stmt = db()->prepare(
+        "UPDATE seed_urls
+         SET active = 1, failed_fetches = 0
+         WHERE active = 0 AND discovered = 0
+           AND failed_fetches >= ?
+           AND last_crawled_at < DATE_SUB(NOW(), INTERVAL ? HOUR)"
+    );
+    $stmt->execute([SEED_FAILURE_THRESHOLD, SEED_COOLDOWN_HOURS]);
+    return $stmt->rowCount();
+}
+
 function crawl_due_seeds(int $limit = 3): array {
+    reactivate_cooled_down_seeds();
+
     $stmt = db()->query(
         "SELECT * FROM seed_urls WHERE active = 1
          ORDER BY (last_crawled_at IS NULL) DESC, last_crawled_at ASC
