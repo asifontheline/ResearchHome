@@ -9,20 +9,22 @@ $pageTitle = 'All tags';
 require __DIR__ . '/includes/header.php';
 ?>
 
-<div class="top-links">
-  <a class="all-link" href="/index.php">By Subject</a>
-  <span class="top-links-sep">&middot;</span>
-  <a class="all-link active" href="/tags.php">By Tag</a>
-</div>
+<div class="tags-page-header">
+  <div class="top-links">
+    <a class="all-link" href="/index.php">By Subject</a>
+    <span class="top-links-sep">&middot;</span>
+    <a class="all-link active" href="/tags.php">By Tag</a>
+  </div>
 
-<h1>All tags</h1>
-<p class="muted">
-  Every tag in the catalog, most-used first — curated subjects (see
-  <a href="/index.php">Browse</a>) plus source-specific classifications
-  (arXiv categories, OpenAlex topics, Crossref subject strings, ...) that
-  don't get their own pill on the browse page. An item without a tag here
-  is still reachable through whatever curated subject it also carries.
-</p>
+  <h1>All tags</h1>
+  <p class="muted">
+    Every tag in the catalog, most-used first — curated subjects (see
+    <a href="/index.php">Browse</a>) plus source-specific classifications
+    (arXiv categories, OpenAlex topics, Crossref subject strings, ...) that
+    don't get their own pill on the browse page. An item without a tag here
+    is still reachable through whatever curated subject it also carries.
+  </p>
+</div>
 
 <div class="subject-pills tags-directory">
   <?php foreach ($tags as $t): ?>

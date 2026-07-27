@@ -188,7 +188,18 @@ nav { display: flex; gap: 1rem; }
 }
 .tags-overflow-link:hover { color: var(--accent); }
 
-.tags-directory { justify-content: flex-start; max-width: none; }
+.tags-page-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.6rem;
+  padding-bottom: 1.5rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.tags-page-header p.muted { max-width: 700px; }
+.tags-directory { justify-content: center; max-width: 900px; margin: 0 auto; }
 
 .project-description {
   color: var(--muted);
