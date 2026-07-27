@@ -951,3 +951,44 @@ function send_monitor_report(): bool {
     $headers = "From: ResHub Monitor <noreply@{$fromDomain}>\r\nContent-Type: text/plain; charset=UTF-8";
     return mail(MONITOR_EMAIL, $report['subject'], $report['body'], $headers);
 }
+
+const MONITOR_WINDOW_HOURS = 8;
+
+/**
+ * Self-expiring hourly digest, callable from any cron-invoked entrypoint —
+ * doesn't need its own cron job, just needs to be called once per
+ * invocation of whatever already runs hourly (harvest.php). Window opens
+ * on first call, tracked via settings so it survives across invocations;
+ * closes automatically after MONITOR_WINDOW_HOURS with exactly one final
+ * "monitoring stopped" email.
+ */
+function run_monitor_check(): array {
+    $expiresAt = get_setting('monitor_expires_at');
+    if (!$expiresAt) {
+        $expiresAt = date('Y-m-d H:i:s', strtotime('+' . MONITOR_WINDOW_HOURS . ' hours'));
+        set_setting('monitor_expires_at', $expiresAt);
+    }
+
+    $windowOpen = time() < strtotime($expiresAt);
+    $alreadyNotifiedClose = get_setting('monitor_close_notified') === '1';
+
+    $sent = false;
+    if ($windowOpen) {
+        $sent = send_monitor_report();
+    } elseif (!$alreadyNotifiedClose) {
+        if (defined('MONITOR_EMAIL') && MONITOR_EMAIL) {
+            $fromDomain = defined('CONTACT_EMAIL') && str_contains(CONTACT_EMAIL, '@')
+                ? substr(CONTACT_EMAIL, strpos(CONTACT_EMAIL, '@') + 1) : 'localhost';
+            $headers = "From: ResHub Monitor <noreply@{$fromDomain}>\r\nContent-Type: text/plain; charset=UTF-8";
+            $body = "The " . MONITOR_WINDOW_HOURS . "-hour monitoring window (started around "
+                . date('Y-m-d H:i:s', strtotime($expiresAt) - MONITOR_WINDOW_HOURS * 3600)
+                . ") has ended. No further automated status emails will be sent.\n\n"
+                . "This is expected, not an error. To resume monitoring, clear the "
+                . "'monitor_expires_at' setting or ask for it to be restarted.";
+            $sent = mail(MONITOR_EMAIL, 'ResHub monitoring window ended', $body, $headers);
+        }
+        set_setting('monitor_close_notified', '1');
+    }
+
+    return ['sent' => $sent, 'window_open' => $windowOpen, 'expires_at' => $expiresAt];
+}

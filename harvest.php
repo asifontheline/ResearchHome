@@ -25,6 +25,13 @@ set_time_limit(240); // stay well under typical shared-hosting cron/script limit
 
 $result = run_content_harvest();
 
+// Rides along on this cron job instead of needing its own — self-expiring,
+// no-ops once MONITOR_EMAIL is unset or the window has closed. See
+// run_monitor_check() in includes/harvester.php.
+if ($isCli) {
+    run_monitor_check();
+}
+
 if ($isCli) {
     printf(
         "Harvest done. Items added: %d. Links discovered: %d. Errors: %d.\n",
