@@ -144,12 +144,14 @@ nav { display: flex; gap: 1rem; }
   margin-bottom: 1.5rem;
   border-bottom: 1px solid var(--border);
 }
+.top-links { display: flex; align-items: center; gap: 0.5rem; }
 .all-link {
   font-weight: 700;
   color: var(--text);
   padding: 0.2rem 0;
 }
 .all-link.active { color: var(--accent); }
+.top-links-sep { color: var(--muted); }
 
 .subject-group {
   display: flex;
