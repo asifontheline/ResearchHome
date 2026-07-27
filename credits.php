@@ -67,11 +67,11 @@ require __DIR__ . '/includes/header.php';
   servers. Every one of those gets credited here too, not just the discovery
   mechanism, with a live count of how many items in the catalog came from each:
 </p>
-<div class="subject-pills tags-directory">
+<ol class="credits-list source-credits-list">
   <?php foreach ($sources as $s): ?>
-    <span class="tag-pill" style="cursor: default;"><?= h($s['source_name']) ?> <span class="count"><?= (int)$s['item_count'] ?></span></span>
+    <li><?= h($s['source_name']) ?> (<?= (int)$s['item_count'] ?>)</li>
   <?php endforeach; ?>
-</div>
+</ol>
 
 <h2>Infrastructure</h2>
 <p class="muted">Built with PHP and MySQL. No tracking, no ads, no accounts beyond a single admin login for the person running this instance.</p>

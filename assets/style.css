@@ -324,6 +324,8 @@ nav { display: flex; gap: 1rem; }
 
 .credits-list { padding-left: 1.5rem; line-height: 1.9; }
 .credits-list li { margin-bottom: 0.5rem; }
+.source-credits-list { line-height: 1.6; font-size: 0.9rem; }
+.source-credits-list li { margin-bottom: 0.2rem; }
 
 .callout {
   background: var(--panel);
