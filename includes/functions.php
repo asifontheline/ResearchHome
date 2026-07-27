@@ -4,6 +4,82 @@ require_once __DIR__ . '/db.php';
 const HARVEST_USER_AGENT_BASE = 'ResHubBot/1.0 (+personal research catalog; respects robots.txt)';
 define('HARVEST_USER_AGENT', HARVEST_USER_AGENT_BASE . (defined('CONTACT_EMAIL') && CONTACT_EMAIL !== 'you@example.com' ? '; contact: ' . CONTACT_EMAIL : ''));
 
+/**
+ * MVP page-view logging — deliberately small (per explicit instruction:
+ * build minimal, keep only if it proves useful, stall further effort
+ * otherwise). Called from header.php, public pages only (admin's own
+ * usage while logged in isn't visitor traffic). No raw IP stored — see
+ * page_views table comment in sql/schema.sql for the hashing rationale.
+ * Best-effort bot filtering by User-Agent; not airtight, not the point —
+ * this is for a rough sense of traffic, not ad-tech-grade analytics.
+ */
+function record_page_view(): void {
+    $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+    if ($ua === '' || preg_match('/bot|crawl|spider|slurp|facebookexternalhit|whatsapp|preview/i', $ua)) {
+        return;
+    }
+
+    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+    $itemId = null;
+    if ($path === '/item.php' && isset($_GET['id'])) {
+        $itemId = (int) $_GET['id'];
+    }
+
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+    $salt = defined('APP_SECRET') ? APP_SECRET : 'no-secret';
+    $visitorHash = hash('sha256', $ip . $salt . date('Y-m-d'));
+
+    $referrerHost = null;
+    if (!empty($_SERVER['HTTP_REFERER'])) {
+        $refHost = parse_url($_SERVER['HTTP_REFERER'], PHP_URL_HOST);
+        // Don't credit ourselves as a "referrer" for internal navigation.
+        if ($refHost && $refHost !== ($_SERVER['HTTP_HOST'] ?? '')) {
+            $referrerHost = mb_strimwidth($refHost, 0, 255, '');
+        }
+    }
+
+    try {
+        db()->prepare(
+            'INSERT INTO page_views (path, item_id, visitor_hash, referrer_host) VALUES (?, ?, ?, ?)'
+        )->execute([mb_strimwidth($path, 0, 255, ''), $itemId, $visitorHash, $referrerHost]);
+    } catch (Throwable $e) {
+        // Never let analytics logging break an actual page load.
+    }
+}
+
+function get_traffic_summary(): array {
+    $windows = ['today' => 'CURDATE()', 'last_7_days' => 'DATE_SUB(NOW(), INTERVAL 7 DAY)', 'last_30_days' => 'DATE_SUB(NOW(), INTERVAL 30 DAY)'];
+    $summary = [];
+    foreach ($windows as $key => $since) {
+        $row = db()->query(
+            "SELECT COUNT(*) AS views, COUNT(DISTINCT visitor_hash) AS unique_visitors
+             FROM page_views WHERE viewed_at >= {$since}"
+        )->fetch();
+        $summary[$key] = ['views' => (int) $row['views'], 'unique_visitors' => (int) $row['unique_visitors']];
+    }
+
+    $summary['top_pages'] = db()->query(
+        "SELECT path, COUNT(*) AS views FROM page_views
+         WHERE viewed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+         GROUP BY path ORDER BY views DESC LIMIT 10"
+    )->fetchAll();
+
+    $summary['top_items'] = db()->query(
+        "SELECT pv.item_id, i.title, COUNT(*) AS views FROM page_views pv
+         JOIN items i ON i.id = pv.item_id
+         WHERE pv.viewed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) AND pv.item_id IS NOT NULL
+         GROUP BY pv.item_id ORDER BY views DESC LIMIT 10"
+    )->fetchAll();
+
+    $summary['top_referrers'] = db()->query(
+        "SELECT referrer_host, COUNT(*) AS views FROM page_views
+         WHERE viewed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) AND referrer_host IS NOT NULL
+         GROUP BY referrer_host ORDER BY views DESC LIMIT 10"
+    )->fetchAll();
+
+    return $summary;
+}
+
 function slugify(string $text): string {
     $text = strtolower(trim($text));
     $text = preg_replace('/[^a-z0-9]+/', '-', $text);

@@ -1,6 +1,11 @@
 <?php
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/functions.php';
+
+// Public-visitor traffic only — not the admin's own logged-in usage.
+if (!current_user()) {
+    record_page_view();
+}
 ?>
 <!doctype html>
 <html lang="en">

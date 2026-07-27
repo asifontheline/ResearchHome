@@ -343,6 +343,15 @@ nav { display: flex; gap: 1rem; }
   margin: 2.5rem 0 1.5rem;
 }
 
+.traffic-summary-table { max-width: 480px; }
+.traffic-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 2rem;
+  margin: 1.5rem 0;
+}
+.traffic-columns h3 { font-size: 0.95rem; margin-bottom: 0.5rem; }
+
 .site-footer {
   max-width: 1100px;
   margin: 2rem auto 0;

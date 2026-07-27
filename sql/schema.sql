@@ -98,6 +98,24 @@ CREATE TABLE IF NOT EXISTS crawl_queue (
     KEY idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Lightweight, privacy-respecting page-view log (public visitors only —
+-- see record_page_view() in functions.php, called from header.php). No raw
+-- IPs stored: visitor_hash is sha256(ip + APP_SECRET + today's date), which
+-- rotates daily so the same visitor can't be correlated across days, while
+-- still allowing a same-day "unique visitors" count via COUNT(DISTINCT).
+-- MVP per explicit instruction: build small, keep only if it proves useful.
+CREATE TABLE IF NOT EXISTS page_views (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    path VARCHAR(255) NOT NULL,
+    item_id INT UNSIGNED DEFAULT NULL,      -- populated for item.php views, for "most viewed items"
+    visitor_hash CHAR(64) NOT NULL,
+    referrer_host VARCHAR(255) DEFAULT NULL,
+    viewed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_viewed_at (viewed_at),
+    KEY idx_path (path),
+    KEY idx_item_id (item_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- One row per harvest.php or discover.php run, for visibility since nothing
 -- is added by hand.
 CREATE TABLE IF NOT EXISTS harvest_log (
