@@ -147,10 +147,11 @@ nav { display: flex; gap: 1rem; }
 .top-links { display: flex; align-items: center; gap: 0.5rem; }
 .all-link {
   font-weight: 700;
-  color: var(--text);
+  color: var(--accent);
   padding: 0.2rem 0;
+  text-decoration: none;
 }
-.all-link.active { color: var(--accent); }
+.all-link.active { text-decoration: underline; text-underline-offset: 3px; }
 .top-links-sep { color: var(--muted); }
 
 .subject-group {

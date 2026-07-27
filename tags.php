@@ -9,6 +9,12 @@ $pageTitle = 'All tags';
 require __DIR__ . '/includes/header.php';
 ?>
 
+<div class="top-links">
+  <a class="all-link" href="/index.php">By Subject</a>
+  <span class="top-links-sep">&middot;</span>
+  <a class="all-link active" href="/tags.php">By Tag</a>
+</div>
+
 <h1>All tags</h1>
 <p class="muted">
   Every tag in the catalog, most-used first — curated subjects (see
