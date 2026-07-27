@@ -63,9 +63,9 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
 
 <nav class="subject-bar">
   <div class="top-links">
-    <a class="all-link <?= $tagSlug === '' ? 'active' : '' ?>" href="/index.php">All items</a>
+    <a class="all-link <?= $tagSlug === '' ? 'active' : '' ?>" href="/index.php">By Subject</a>
     <span class="top-links-sep">&middot;</span>
-    <a class="all-link" href="/tags.php">All tags</a>
+    <a class="all-link" href="/tags.php">By Tag</a>
   </div>
 
   <?php foreach ($grouped['groups'] as $parent => $subjects): ?>
