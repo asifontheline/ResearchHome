@@ -23,6 +23,8 @@ require __DIR__ . '/includes/header.php';
 <p class="muted">
   These 6 free APIs are how content is <em>found</em> — listed in the order
   the harvester queries them each run (see <code>includes/harvester.php</code>).
+  The <?= count($sources) ?> actual publishers and repositories behind that
+  content are credited separately — <a href="#publishers">jump to the full list &darr;</a>.
 </p>
 
 <ol class="credits-list">
@@ -60,7 +62,8 @@ require __DIR__ . '/includes/header.php';
   look like listing/index pages on a domain it's never touched before.
 </p>
 
-<h2>Every publisher &amp; repository represented (<?= count($sources) ?>)</h2>
+<hr class="section-divider">
+<h2 id="publishers">Every publisher &amp; repository represented (<?= count($sources) ?>)</h2>
 <p class="muted">
   The 6 APIs above find content, but the content itself comes from wherever it
   was actually published — journals, university repositories, preprint

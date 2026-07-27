@@ -337,6 +337,12 @@ nav { display: flex; gap: 1rem; }
   line-height: 1.6;
 }
 
+.section-divider {
+  border: none;
+  border-top: 2px solid var(--border);
+  margin: 2.5rem 0 1.5rem;
+}
+
 .site-footer {
   max-width: 1100px;
   margin: 2rem auto 0;
