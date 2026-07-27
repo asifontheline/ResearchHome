@@ -21,7 +21,12 @@ if (!$isCli) {
     }
 }
 
-set_time_limit(240); // stay well under typical shared-hosting cron/script limits
+// CLI (cron) gets the full run budget (HARVEST_MAX_RUNTIME_MINUTES, 59) —
+// run_content_harvest()'s own soft time-budget checks are what actually
+// stop it early; this is just the outer safety net. The admin "run now"
+// web trigger stays short — a human is waiting on that request, a
+// multi-hour browser hang isn't useful even if the host would allow it.
+set_time_limit($isCli ? HARVEST_MAX_RUNTIME_MINUTES * 60 : 240);
 
 $result = run_content_harvest();
 

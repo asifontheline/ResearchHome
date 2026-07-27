@@ -1,6 +1,44 @@
 <?php
 require_once __DIR__ . '/functions.php';
 
+// ---- Run locking + soft time budget --------------------------------------
+//
+// Two separate safeguards against overlapping/runaway cron invocations:
+//
+// 1. A lock (settings table) so a new harvest.php/discover.php invocation
+//    refuses to start if a previous one is still within its max plausible
+//    runtime — cron firing again before the last run finished (a slow batch
+//    of external API calls, a big backlog of seeds) would otherwise spawn a
+//    second instance racing the first over the same DB rows. The lock has
+//    a max age shorter than the cron interval itself, so a genuinely
+//    crashed/killed run (which can't release its own lock) self-heals on
+//    the next tick rather than deadlocking forever.
+// 2. A soft time budget checked inside each loop, *between* items — not a
+//    hard kill. When the budget is exceeded, the current item still
+//    finishes cleanly and the loop simply stops starting new ones. Whatever
+//    wasn't reached (remaining seeds, queue rows, API sources) is untouched
+//    — crawl_queue/seed_urls/settings are all already designed to persist
+//    that as normal pending work, so the next cron cycle just continues
+//    where this one left off instead of anything being lost.
+
+function acquire_run_lock(string $lockName, int $maxMinutes): bool {
+    $key = "{$lockName}_lock_started_at";
+    $existing = get_setting($key);
+    if ($existing && (time() - strtotime($existing)) < $maxMinutes * 60) {
+        return false; // still within another run's plausible runtime — don't overlap
+    }
+    set_setting($key, date('Y-m-d H:i:s'));
+    return true;
+}
+
+function release_run_lock(string $lockName): void {
+    set_setting("{$lockName}_lock_started_at", '');
+}
+
+function time_budget_exceeded(float $deadline): bool {
+    return microtime(true) > $deadline;
+}
+
 // ---- Politeness: robots.txt + per-host rate limiting ---------------------
 
 function get_or_fetch_host(string $host): array {
@@ -433,7 +471,7 @@ function mark_source_called(string $source): void {
     set_setting("source_last_called:{$source}", date('Y-m-d H:i:s'));
 }
 
-function run_api_harvest(array $subjects, int $perSourceMax = 5, int $subjectsPerRun = 1): array {
+function run_api_harvest(array $subjects, int $perSourceMax = 5, int $subjectsPerRun = 1, ?float $deadline = null): array {
     $slugs = array_keys($subjects);
     $cursor = (int) get_setting('subject_cursor', '0') % count($slugs);
     $batch = [];
@@ -450,9 +488,14 @@ function run_api_harvest(array $subjects, int $perSourceMax = 5, int $subjectsPe
     $added = 0;
     $errors = [];
     $skipped = [];
+    $stoppedEarly = false;
     foreach ($batch as $slug) {
         $keyword = $subjects[$slug]['keywords'][0];
         foreach ($sources as $fn) {
+            if ($deadline !== null && time_budget_exceeded($deadline)) {
+                $stoppedEarly = true;
+                break 2;
+            }
             if (!source_ready($fn)) {
                 $skipped[] = $fn;
                 continue;
@@ -467,6 +510,9 @@ function run_api_harvest(array $subjects, int $perSourceMax = 5, int $subjectsPe
                 $errors[] = "{$fn}({$slug}): " . $e->getMessage();
             }
         }
+    }
+    if ($stoppedEarly) {
+        $errors[] = 'Stopped early: time budget exceeded — remaining sources resume next run.';
     }
     return ['added' => $added, 'errors' => $errors, 'subjects' => $batch, 'skipped' => array_unique($skipped)];
 }
@@ -605,7 +651,7 @@ function reactivate_cooled_down_seeds(): int {
     return $stmt->rowCount();
 }
 
-function crawl_due_seeds(int $limit = 3): array {
+function crawl_due_seeds(int $limit = 3, ?float $deadline = null): array {
     reactivate_cooled_down_seeds();
 
     $stmt = db()->query(
@@ -618,6 +664,10 @@ function crawl_due_seeds(int $limit = 3): array {
     $discovered = 0;
     $errors = [];
     foreach ($seeds as $seed) {
+        if ($deadline !== null && time_budget_exceeded($deadline)) {
+            $errors[] = 'Stopped early: time budget exceeded — remaining seeds resume next run.';
+            break;
+        }
         try {
             if (!can_crawl_url($seed['url'])) continue;
             $host = parse_url($seed['url'], PHP_URL_HOST);
@@ -673,7 +723,7 @@ function host_known_before_this_run(string $host): bool {
     return (bool) $stmt->fetchColumn();
 }
 
-function process_queue_batch(int $limit = 20): array {
+function process_queue_batch(int $limit = 20, ?float $deadline = null): array {
     $stmt = db()->query(
         "SELECT * FROM crawl_queue WHERE status = 'pending' ORDER BY discovered_at ASC LIMIT " . (int)$limit
     );
@@ -682,6 +732,9 @@ function process_queue_batch(int $limit = 20): array {
     $added = 0;
     $errors = 0;
     foreach ($rows as $row) {
+        if ($deadline !== null && time_budget_exceeded($deadline)) {
+            break; // remaining rows stay 'pending', picked up next run
+        }
         try {
             // Checked before can_crawl_url() touches the hosts table, so it
             // reflects whether we'd ever seen this host prior to this run.
@@ -748,7 +801,7 @@ function process_queue_batch(int $limit = 20): array {
  */
 const LINK_FAILURE_THRESHOLD = 3;
 
-function check_links_batch(int $limit = 8): array {
+function check_links_batch(int $limit = 8, ?float $deadline = null): array {
     $rows = db()->query(
         "SELECT id, url, failed_checks FROM items
          WHERE last_checked_at IS NULL OR last_checked_at < DATE_SUB(NOW(), INTERVAL 7 DAY)
@@ -759,6 +812,9 @@ function check_links_batch(int $limit = 8): array {
     $checked = 0;
     $removed = 0;
     foreach ($rows as $row) {
+        if ($deadline !== null && time_budget_exceeded($deadline)) {
+            break; // remaining items just wait for next run's check
+        }
         $code = check_url_status($row['url']);
         $checked++;
 
@@ -786,6 +842,10 @@ function check_links_batch(int $limit = 8): array {
 
 // ---- Orchestrator -------------------------------------------------------
 
+// Must stay under the cron interval (hourly) so a genuinely-stuck run's
+// lock self-heals before the next tick would otherwise be blocked forever.
+const HARVEST_MAX_RUNTIME_MINUTES = 59;
+
 /**
  * Content harvest: API sources + crawl + link-health. Meant to run
  * frequently (harvest.php on its own cron entry) — everything in here is
@@ -793,6 +853,15 @@ function check_links_batch(int $limit = 8): array {
  * mostly no-op cheaply rather than doing redundant work.
  */
 function run_content_harvest(): array {
+    if (!acquire_run_lock('harvest', HARVEST_MAX_RUNTIME_MINUTES)) {
+        return [
+            'items_added' => 0, 'links_discovered' => 0, 'links_checked' => 0,
+            'items_removed' => 0, 'new_hosts_discovered' => 0,
+            'errors' => ['Skipped: a previous harvest run is still within its ' . HARVEST_MAX_RUNTIME_MINUTES . '-minute window — avoiding an overlapping run.'],
+        ];
+    }
+
+    $deadline = microtime(true) + HARVEST_MAX_RUNTIME_MINUTES * 60;
     $subjects = require __DIR__ . '/subjects.php';
     $logPdo = db();
     $logPdo->prepare("INSERT INTO harvest_log (started_at, run_type) VALUES (NOW(), 'harvest')")->execute();
@@ -809,26 +878,28 @@ function run_content_harvest(): array {
     // A crash partway through (a slow external API triggering the shared
     // host's MySQL wait_timeout mid-run has caused this before — see
     // db()'s reconnect logic) must still leave an honest, finished log row
-    // instead of one stuck showing "running…" forever.
+    // instead of one stuck showing "running…" forever. The lock release
+    // below must run regardless too, or a crash would leave it stuck
+    // "locked" for the full window instead of self-healing immediately.
     try {
         $hostsBefore = (int) db()->query('SELECT COUNT(*) FROM hosts')->fetchColumn();
 
-        $api = run_api_harvest($subjects);
+        $api = run_api_harvest($subjects, 5, 1, $deadline);
         $itemsAdded += $api['added'];
         $errors = array_merge($errors, $api['errors']);
         if ($api['skipped']) {
             $errors[] = 'Skipped (called within the last hour): ' . implode(', ', $api['skipped']);
         }
 
-        $seeds = crawl_due_seeds();
+        $seeds = crawl_due_seeds(3, $deadline);
         $linksDiscovered = $seeds['discovered'];
         $errors = array_merge($errors, $seeds['errors']);
 
-        $queue = process_queue_batch();
+        $queue = process_queue_batch(20, $deadline);
         $itemsAdded += $queue['added'];
         $queueErrors = $queue['errors'];
 
-        $linkCheck = check_links_batch();
+        $linkCheck = check_links_batch(8, $deadline);
         $linksChecked = $linkCheck['checked'];
         $itemsRemoved = $linkCheck['removed'];
 
@@ -840,6 +911,8 @@ function run_content_harvest(): array {
         $newHostsDiscovered = max(0, $hostsAfter - $hostsBefore);
     } catch (Throwable $e) {
         $errors[] = 'FATAL: ' . $e->getMessage();
+    } finally {
+        release_run_lock('harvest');
     }
 
     db()->prepare(
@@ -862,6 +935,10 @@ function run_content_harvest(): array {
     ];
 }
 
+// Must stay under the cron interval (30 min) so a genuinely-stuck run's
+// lock self-heals before the next tick would otherwise be blocked forever.
+const DISCOVERY_MAX_RUNTIME_MINUTES = 29;
+
 /**
  * Source discovery only (§4.2.1 in DESIGN.md): proposes new seeds, doesn't
  * crawl or harvest content. Meant to run on its own, less-frequent cron
@@ -870,6 +947,13 @@ function run_content_harvest(): array {
  * is already gated to once per 24h regardless of how often it's invoked.
  */
 function run_source_discovery(): array {
+    if (!acquire_run_lock('discovery', DISCOVERY_MAX_RUNTIME_MINUTES)) {
+        return [
+            'new_seeds_discovered' => 0,
+            'errors' => ['Skipped: a previous discovery run is still within its ' . DISCOVERY_MAX_RUNTIME_MINUTES . '-minute window — avoiding an overlapping run.'],
+        ];
+    }
+
     $logPdo = db();
     $logPdo->prepare("INSERT INTO harvest_log (started_at, run_type) VALUES (NOW(), 'discovery')")->execute();
     $logId = (int) $logPdo->lastInsertId();
@@ -882,6 +966,8 @@ function run_source_discovery(): array {
         $errors = $discovery['errors'];
     } catch (Throwable $e) {
         $errors[] = 'FATAL: ' . $e->getMessage();
+    } finally {
+        release_run_lock('discovery');
     }
 
     db()->prepare(

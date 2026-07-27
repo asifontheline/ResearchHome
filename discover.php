@@ -26,7 +26,9 @@ if (!$isCli) {
     }
 }
 
-set_time_limit(60);
+// CLI (cron) gets the full run budget (DISCOVERY_MAX_RUNTIME_MINUTES, 29);
+// the admin web trigger stays short since a human is waiting on it.
+set_time_limit($isCli ? DISCOVERY_MAX_RUNTIME_MINUTES * 60 : 60);
 
 $result = run_source_discovery();
 
