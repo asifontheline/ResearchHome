@@ -463,6 +463,7 @@ function run_api_harvest(array $subjects, int $perSourceMax = 5, int $subjectsPe
                 $added += $result['added'];
                 if (!empty($result['error'])) $errors[] = "{$fn}({$slug}): {$result['error']}";
             } catch (Throwable $e) {
+                db(true); // reconnect so the next source function gets a working connection
                 $errors[] = "{$fn}({$slug}): " . $e->getMessage();
             }
         }
@@ -591,41 +592,50 @@ function crawl_due_seeds(int $limit = 3): array {
     $discovered = 0;
     $errors = [];
     foreach ($seeds as $seed) {
-        if (!can_crawl_url($seed['url'])) continue;
-        $host = parse_url($seed['url'], PHP_URL_HOST);
+        try {
+            if (!can_crawl_url($seed['url'])) continue;
+            $host = parse_url($seed['url'], PHP_URL_HOST);
 
-        $body = safe_http_get($seed['url'], ["User-Agent: " . HARVEST_USER_AGENT]);
-        mark_host_crawled($host);
+            $body = safe_http_get($seed['url'], ["User-Agent: " . HARVEST_USER_AGENT]);
+            mark_host_crawled($host);
 
-        if (!$body) {
-            $failures = (int) $seed['failed_fetches'] + 1;
-            if ($failures >= SEED_FAILURE_THRESHOLD) {
-                db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ?, active = 0 WHERE id = ?')
-                    ->execute([$failures, $seed['id']]);
-                $errors[] = "seed {$seed['id']} ({$seed['url']}) fetch failed {$failures}x — auto-disabled (likely bot-protected or unreachable; re-enable in seeds.php to retry)";
-            } else {
-                db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ? WHERE id = ?')
-                    ->execute([$failures, $seed['id']]);
-                $errors[] = "seed {$seed['id']} ({$seed['url']}) fetch failed ({$failures}/" . SEED_FAILURE_THRESHOLD . ")";
+            if (!$body) {
+                $failures = (int) $seed['failed_fetches'] + 1;
+                if ($failures >= SEED_FAILURE_THRESHOLD) {
+                    db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ?, active = 0 WHERE id = ?')
+                        ->execute([$failures, $seed['id']]);
+                    $errors[] = "seed {$seed['id']} ({$seed['url']}) fetch failed {$failures}x — auto-disabled (likely bot-protected or unreachable; re-enable in seeds.php to retry)";
+                } else {
+                    db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ? WHERE id = ?')
+                        ->execute([$failures, $seed['id']]);
+                    $errors[] = "seed {$seed['id']} ({$seed['url']}) fetch failed ({$failures}/" . SEED_FAILURE_THRESHOLD . ")";
+                }
+                continue;
             }
-            continue;
-        }
 
-        db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = 0 WHERE id = ?')->execute([$seed['id']]);
+            db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = 0 WHERE id = ?')->execute([$seed['id']]);
 
-        $links = extract_links($body, $seed['url']);
-        foreach ($links as $link) {
-            $hash = url_hash($link['url']);
-            $linkHost = parse_url($link['url'], PHP_URL_HOST);
-            if (!$linkHost) continue;
-            try {
-                db()->prepare(
-                    'INSERT IGNORE INTO crawl_queue (url, url_hash, host, subject_slug) VALUES (?, ?, ?, ?)'
-                )->execute([$link['url'], $hash, $linkHost, $seed['subject_slug']]);
-                $discovered++;
-            } catch (Throwable $e) {
-                // duplicate or malformed, skip
+            $links = extract_links($body, $seed['url']);
+            foreach ($links as $link) {
+                $hash = url_hash($link['url']);
+                $linkHost = parse_url($link['url'], PHP_URL_HOST);
+                if (!$linkHost) continue;
+                try {
+                    db()->prepare(
+                        'INSERT IGNORE INTO crawl_queue (url, url_hash, host, subject_slug) VALUES (?, ?, ?, ?)'
+                    )->execute([$link['url'], $hash, $linkHost, $seed['subject_slug']]);
+                    $discovered++;
+                } catch (Throwable $e) {
+                    // duplicate or malformed, skip
+                }
             }
+        } catch (Throwable $e) {
+            // A dead connection (e.g. "MySQL server has gone away" after a
+            // slow fetch above) or any other failure here must not crash the
+            // whole run — reconnect so the next seed gets a working
+            // connection, log it, and move on.
+            db(true);
+            $errors[] = "seed {$seed['id']} ({$seed['url']}): " . $e->getMessage();
         }
     }
     return ['discovered' => $discovered, 'errors' => $errors];
@@ -646,15 +656,15 @@ function process_queue_batch(int $limit = 20): array {
     $added = 0;
     $errors = 0;
     foreach ($rows as $row) {
-        // Checked before can_crawl_url() touches the hosts table, so it
-        // reflects whether we'd ever seen this host prior to this run.
-        $hostIsNew = !host_known_before_this_run($row['host']);
-
-        if (!can_crawl_url($row['url'])) {
-            continue; // leave pending, try again on a later run once the host cools down
-        }
-
         try {
+            // Checked before can_crawl_url() touches the hosts table, so it
+            // reflects whether we'd ever seen this host prior to this run.
+            $hostIsNew = !host_known_before_this_run($row['host']);
+
+            if (!can_crawl_url($row['url'])) {
+                continue; // leave pending, try again on a later run once the host cools down
+            }
+
             $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
             mark_host_crawled($row['host']);
 
@@ -685,8 +695,17 @@ function process_queue_batch(int $limit = 20): array {
             db()->prepare("UPDATE crawl_queue SET status='done', processed_at=NOW() WHERE id=?")->execute([$row['id']]);
         } catch (Throwable $e) {
             $errors++;
-            db()->prepare("UPDATE crawl_queue SET status='error', processed_at=NOW(), error=? WHERE id=?")
-                ->execute([$e->getMessage(), $row['id']]);
+            // Reconnect BEFORE using db() again — if a dead connection is
+            // what threw in the first place, logging the error would fail
+            // too otherwise, masking the real problem with a second one.
+            db(true);
+            try {
+                db()->prepare("UPDATE crawl_queue SET status='error', processed_at=NOW(), error=? WHERE id=?")
+                    ->execute([$e->getMessage(), $row['id']]);
+            } catch (Throwable $e2) {
+                // Even the reconnect+log attempt failed; move on rather than
+                // crash the whole batch over one row.
+            }
         }
     }
     return ['added' => $added, 'errors' => $errors];
@@ -749,37 +768,53 @@ function check_links_batch(int $limit = 8): array {
  */
 function run_content_harvest(): array {
     $subjects = require __DIR__ . '/subjects.php';
-    $stmt = db()->prepare("INSERT INTO harvest_log (started_at, run_type) VALUES (NOW(), 'harvest')");
-    $stmt->execute();
-    $logId = (int) db()->lastInsertId();
-
-    $hostsBefore = (int) db()->query('SELECT COUNT(*) FROM hosts')->fetchColumn();
+    $logPdo = db();
+    $logPdo->prepare("INSERT INTO harvest_log (started_at, run_type) VALUES (NOW(), 'harvest')")->execute();
+    $logId = (int) $logPdo->lastInsertId();
 
     $itemsAdded = 0;
+    $linksDiscovered = 0;
+    $linksChecked = 0;
+    $itemsRemoved = 0;
+    $newHostsDiscovered = 0;
+    $queueErrors = 0;
     $errors = [];
 
-    $api = run_api_harvest($subjects);
-    $itemsAdded += $api['added'];
-    $errors = array_merge($errors, $api['errors']);
-    if ($api['skipped']) {
-        $errors[] = 'Skipped (called within the last hour): ' . implode(', ', $api['skipped']);
+    // A crash partway through (a slow external API triggering the shared
+    // host's MySQL wait_timeout mid-run has caused this before — see
+    // db()'s reconnect logic) must still leave an honest, finished log row
+    // instead of one stuck showing "running…" forever.
+    try {
+        $hostsBefore = (int) db()->query('SELECT COUNT(*) FROM hosts')->fetchColumn();
+
+        $api = run_api_harvest($subjects);
+        $itemsAdded += $api['added'];
+        $errors = array_merge($errors, $api['errors']);
+        if ($api['skipped']) {
+            $errors[] = 'Skipped (called within the last hour): ' . implode(', ', $api['skipped']);
+        }
+
+        $seeds = crawl_due_seeds();
+        $linksDiscovered = $seeds['discovered'];
+        $errors = array_merge($errors, $seeds['errors']);
+
+        $queue = process_queue_batch();
+        $itemsAdded += $queue['added'];
+        $queueErrors = $queue['errors'];
+
+        $linkCheck = check_links_batch();
+        $linksChecked = $linkCheck['checked'];
+        $itemsRemoved = $linkCheck['removed'];
+
+        // Every new row in `hosts` since this run started is a domain the
+        // crawler had never touched before — a concrete, honest measure of
+        // "new sources found on the internet" via link-following from known
+        // research entry points (not a claim of discovering unknown APIs).
+        $hostsAfter = (int) db()->query('SELECT COUNT(*) FROM hosts')->fetchColumn();
+        $newHostsDiscovered = max(0, $hostsAfter - $hostsBefore);
+    } catch (Throwable $e) {
+        $errors[] = 'FATAL: ' . $e->getMessage();
     }
-
-    $seeds = crawl_due_seeds();
-    $linksDiscovered = $seeds['discovered'];
-    $errors = array_merge($errors, $seeds['errors']);
-
-    $queue = process_queue_batch();
-    $itemsAdded += $queue['added'];
-
-    $linkCheck = check_links_batch();
-
-    // Every new row in `hosts` since this run started is a domain the
-    // crawler had never touched before — a concrete, honest measure of
-    // "new sources found on the internet" via link-following from known
-    // research entry points (not a claim of discovering unknown APIs).
-    $hostsAfter = (int) db()->query('SELECT COUNT(*) FROM hosts')->fetchColumn();
-    $newHostsDiscovered = max(0, $hostsAfter - $hostsBefore);
 
     db()->prepare(
         'UPDATE harvest_log
@@ -787,15 +822,15 @@ function run_content_harvest(): array {
              items_removed = ?, new_hosts_discovered = ?, errors = ?, detail = ?
          WHERE id = ?'
     )->execute([
-        $itemsAdded, $linksDiscovered, $linkCheck['checked'], $linkCheck['removed'],
-        $newHostsDiscovered, count($errors) + $queue['errors'], implode("\n", $errors), $logId,
+        $itemsAdded, $linksDiscovered, $linksChecked, $itemsRemoved,
+        $newHostsDiscovered, count($errors) + $queueErrors, implode("\n", $errors), $logId,
     ]);
 
     return [
         'items_added' => $itemsAdded,
         'links_discovered' => $linksDiscovered,
-        'links_checked' => $linkCheck['checked'],
-        'items_removed' => $linkCheck['removed'],
+        'links_checked' => $linksChecked,
+        'items_removed' => $itemsRemoved,
         'new_hosts_discovered' => $newHostsDiscovered,
         'errors' => $errors,
     ];
@@ -809,20 +844,28 @@ function run_content_harvest(): array {
  * is already gated to once per 24h regardless of how often it's invoked.
  */
 function run_source_discovery(): array {
-    $stmt = db()->prepare("INSERT INTO harvest_log (started_at, run_type) VALUES (NOW(), 'discovery')");
-    $stmt->execute();
-    $logId = (int) db()->lastInsertId();
+    $logPdo = db();
+    $logPdo->prepare("INSERT INTO harvest_log (started_at, run_type) VALUES (NOW(), 'discovery')")->execute();
+    $logId = (int) $logPdo->lastInsertId();
 
-    $discovery = discover_new_seeds();
+    $proposed = 0;
+    $errors = [];
+    try {
+        $discovery = discover_new_seeds();
+        $proposed = $discovery['proposed'];
+        $errors = $discovery['errors'];
+    } catch (Throwable $e) {
+        $errors[] = 'FATAL: ' . $e->getMessage();
+    }
 
     db()->prepare(
         'UPDATE harvest_log SET finished_at = NOW(), new_seeds_discovered = ?, errors = ?, detail = ? WHERE id = ?'
     )->execute([
-        $discovery['proposed'], count($discovery['errors']), implode("\n", $discovery['errors']), $logId,
+        $proposed, count($errors), implode("\n", $errors), $logId,
     ]);
 
     return [
-        'new_seeds_discovered' => $discovery['proposed'],
-        'errors' => $discovery['errors'],
+        'new_seeds_discovered' => $proposed,
+        'errors' => $errors,
     ];
 }

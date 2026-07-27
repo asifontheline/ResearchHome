@@ -119,14 +119,21 @@ function url_hash(string $url): string {
  * or null if it was already present (dedup by url_hash).
  */
 function insert_item_if_new(array $fields, array $tagNames = []): ?int {
+    // One captured connection for the whole operation — lastInsertId() is
+    // only valid on the exact connection that did the INSERT, so this must
+    // not call db() again in between (a reconnect elsewhere swapping the
+    // static instance would otherwise make lastInsertId() return 0, which
+    // then corrupts item_tags with a foreign-key-violating row).
+    $pdo = db();
+
     $hash = url_hash($fields['url']);
-    $exists = db()->prepare('SELECT id FROM items WHERE url_hash = ?');
+    $exists = $pdo->prepare('SELECT id FROM items WHERE url_hash = ?');
     $exists->execute([$hash]);
     if ($exists->fetch()) {
         return null;
     }
 
-    $stmt = db()->prepare(
+    $stmt = $pdo->prepare(
         'INSERT INTO items (title, url, url_hash, authors, abstract, notes, source_name, published_date, image_url)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
@@ -141,7 +148,10 @@ function insert_item_if_new(array $fields, array $tagNames = []): ?int {
         $fields['published_date'] ?? null,
         $fields['image_url'] ?? null,
     ]);
-    $itemId = (int) db()->lastInsertId();
+    $itemId = (int) $pdo->lastInsertId();
+    if ($itemId <= 0) {
+        throw new RuntimeException('insert_item_if_new: lastInsertId() returned 0 after a successful insert — refusing to write item_tags against an invalid id.');
+    }
 
     if ($tagNames) {
         set_item_tags($itemId, resolve_tag_ids(implode(',', $tagNames)));
