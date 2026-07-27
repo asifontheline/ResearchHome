@@ -847,12 +847,34 @@ function check_links_batch(int $limit = 8, ?float $deadline = null): array {
 const HARVEST_MAX_RUNTIME_MINUTES = 59;
 
 /**
+ * True if a harvest run has already started this clock hour (>= HH:00:00).
+ * A hard cap independent of the lock above — the lock only stops two runs
+ * overlapping in time, it doesn't stop a stray extra cron entry (or a
+ * misfiring host scheduler) from firing a second complete run within the
+ * same hour once the first one has already finished and released its lock.
+ */
+function harvest_already_ran_this_hour(): bool {
+    $hourStart = date('Y-m-d H:00:00');
+    $stmt = db()->prepare("SELECT 1 FROM harvest_log WHERE run_type = 'harvest' AND started_at >= ? LIMIT 1");
+    $stmt->execute([$hourStart]);
+    return (bool) $stmt->fetchColumn();
+}
+
+/**
  * Content harvest: API sources + crawl + link-health. Meant to run
  * frequently (harvest.php on its own cron entry) — everything in here is
  * already internally cooldown-gated per source, so frequent invocations
  * mostly no-op cheaply rather than doing redundant work.
  */
 function run_content_harvest(): array {
+    if (harvest_already_ran_this_hour()) {
+        return [
+            'items_added' => 0, 'links_discovered' => 0, 'links_checked' => 0,
+            'items_removed' => 0, 'new_hosts_discovered' => 0,
+            'errors' => ['Skipped: a harvest run already started this hour (' . date('Y-m-d H:00') . ' UTC) — capped to one per hour regardless of how many times this gets invoked.'],
+        ];
+    }
+
     if (!acquire_run_lock('harvest', HARVEST_MAX_RUNTIME_MINUTES)) {
         return [
             'items_added' => 0, 'links_discovered' => 0, 'links_checked' => 0,
