@@ -1,6 +1,16 @@
 <?php
 require_once __DIR__ . '/../config.php';
 
+// Every timestamp in this app should be UTC, full stop — the alternative is
+// whatever timezone the MySQL server happens to be configured with (found
+// to be IST on production, the OS default on local dev, i.e. inconsistent
+// per-deployment) while PHP's date()/time() are UTC (PHP's own default,
+// confirmed via date_default_timezone_get()). That mismatch is exactly what
+// put a wrong "sent at" timestamp in the monitoring email. Setting both
+// sides to UTC explicitly, here, fixes it the same way on every deployment
+// rather than special-casing one server's timezone.
+date_default_timezone_set('UTC');
+
 function create_db_connection(): PDO {
     // DB_SOCKET (optional) is the faster, more reliable path when the app
     // and MySQL run on the same server — set it in config.php to something
@@ -9,10 +19,14 @@ function create_db_connection(): PDO {
     $dsn = (defined('DB_SOCKET') && DB_SOCKET)
         ? 'mysql:unix_socket=' . DB_SOCKET . ';dbname=' . DB_NAME . ';charset=utf8mb4'
         : 'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4';
-    return new PDO($dsn, DB_USER, DB_PASS, [
+    $pdo = new PDO($dsn, DB_USER, DB_PASS, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
+    // Makes NOW()/CURRENT_TIMESTAMP/CURDATE() on this connection return UTC
+    // too, regardless of the MySQL server's own configured timezone.
+    $pdo->exec("SET time_zone = '+00:00'");
+    return $pdo;
 }
 
 /**

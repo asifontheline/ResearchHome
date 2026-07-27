@@ -27,7 +27,7 @@ require __DIR__ . '/includes/header.php';
 <p id="run-now-status" class="muted"></p>
 
 <table class="seed-table">
-  <thead><tr><th>Type</th><th>Started</th><th>Finished</th><th>Items added</th><th>Links discovered</th><th>Links checked</th><th>Items removed (dead links)</th><th>New hosts</th><th>New seeds</th><th>Errors</th></tr></thead>
+  <thead><tr><th>Type</th><th>Started (UTC)</th><th>Finished (UTC)</th><th>Items added</th><th>Links discovered</th><th>Links checked</th><th>Items removed (dead links)</th><th>New hosts</th><th>New seeds</th><th>Errors</th></tr></thead>
   <tbody>
     <?php foreach ($runs as $r): ?>
       <tr>

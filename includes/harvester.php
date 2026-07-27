@@ -901,7 +901,7 @@ function build_monitor_report(): array {
     $harvestCronLikelyDown = !$lastHarvest || strtotime($lastHarvest) < strtotime('-2 hours');
 
     $lines = [];
-    $lines[] = "ResHub status digest — " . date('Y-m-d H:i:s') . ' server time';
+    $lines[] = "ResHub status digest — " . date('Y-m-d H:i:s') . ' UTC';
     $lines[] = str_repeat('=', 60);
     $lines[] = '';
     $lines[] = "Catalog: {$summary['total_items']} items, {$summary['total_tags']} tags, {$summary['total_sources']} sources";

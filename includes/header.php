@@ -25,7 +25,7 @@ require_once __DIR__ . '/functions.php';
       <tr><td>Tags</td><td><?= number_format($summary['total_tags']) ?></td></tr>
       <tr><td>Sources</td><td><?= number_format($summary['total_sources']) ?></td></tr>
       <?php if ($summary['last_run']): ?>
-        <tr><td>Last harvest</td><td><?= h(substr($summary['last_run']['started_at'], 5, 11)) ?></td></tr>
+        <tr><td>Last harvest (UTC)</td><td><?= h(substr($summary['last_run']['started_at'], 5, 11)) ?></td></tr>
       <?php endif; ?>
     </table>
     <nav>
