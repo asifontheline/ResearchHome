@@ -940,16 +940,29 @@ function build_monitor_report(): array {
     return ['subject' => $subject, 'body' => implode("\n", $lines), 'has_problem' => $hasProblem];
 }
 
+/**
+ * Sends via the real configured mailbox (CONTACT_EMAIL), not a fabricated
+ * "noreply@" address that likely doesn't exist as an actual mailbox on
+ * this account — and critically, sets the same address as the SMTP
+ * envelope sender (mail()'s 5th param, -f) explicitly. Without it,
+ * sendmail falls back to a default derived from the server's own
+ * hostname (confirmed via gethostname() to be an unrelated shared-hosting
+ * node name, not this site's domain), which fails SPF outright for every
+ * domain and gets silently dropped by Gmail — no bounce, nothing.
+ */
+function send_email(string $to, string $subject, string $body): bool {
+    $from = defined('CONTACT_EMAIL') && CONTACT_EMAIL !== 'you@example.com' ? CONTACT_EMAIL : null;
+    if (!$from) return false;
+    $headers = "From: ResHub <{$from}>\r\nContent-Type: text/plain; charset=UTF-8";
+    return mail($to, $subject, $body, $headers, '-f' . $from);
+}
+
 function send_monitor_report(): bool {
     if (!defined('MONITOR_EMAIL') || !MONITOR_EMAIL) {
         return false;
     }
     $report = build_monitor_report();
-    $fromDomain = defined('CONTACT_EMAIL') && str_contains(CONTACT_EMAIL, '@')
-        ? substr(CONTACT_EMAIL, strpos(CONTACT_EMAIL, '@') + 1)
-        : 'localhost';
-    $headers = "From: ResHub Monitor <noreply@{$fromDomain}>\r\nContent-Type: text/plain; charset=UTF-8";
-    return mail(MONITOR_EMAIL, $report['subject'], $report['body'], $headers);
+    return send_email(MONITOR_EMAIL, $report['subject'], $report['body']);
 }
 
 const MONITOR_WINDOW_HOURS = 8;
@@ -977,15 +990,12 @@ function run_monitor_check(): array {
         $sent = send_monitor_report();
     } elseif (!$alreadyNotifiedClose) {
         if (defined('MONITOR_EMAIL') && MONITOR_EMAIL) {
-            $fromDomain = defined('CONTACT_EMAIL') && str_contains(CONTACT_EMAIL, '@')
-                ? substr(CONTACT_EMAIL, strpos(CONTACT_EMAIL, '@') + 1) : 'localhost';
-            $headers = "From: ResHub Monitor <noreply@{$fromDomain}>\r\nContent-Type: text/plain; charset=UTF-8";
             $body = "The " . MONITOR_WINDOW_HOURS . "-hour monitoring window (started around "
                 . date('Y-m-d H:i:s', strtotime($expiresAt) - MONITOR_WINDOW_HOURS * 3600)
                 . ") has ended. No further automated status emails will be sent.\n\n"
                 . "This is expected, not an error. To resume monitoring, clear the "
                 . "'monitor_expires_at' setting or ask for it to be restarted.";
-            $sent = mail(MONITOR_EMAIL, 'ResHub monitoring window ended', $body, $headers);
+            $sent = send_email(MONITOR_EMAIL, 'ResHub monitoring window ended', $body);
         }
         set_setting('monitor_close_notified', '1');
     }
