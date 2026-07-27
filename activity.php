@@ -23,7 +23,7 @@ require __DIR__ . '/includes/header.php';
 
 <h2>Recent harvest runs</h2>
 <table class="seed-table">
-  <thead><tr><th>Type</th><th>Started</th><th>Finished</th><th>Items added</th><th>Links discovered</th><th>Items removed (dead links)</th><th>New hosts</th><th>New seeds</th></tr></thead>
+  <thead><tr><th>Type</th><th>Started (UTC)</th><th>Finished (UTC)</th><th>Items added</th><th>Links discovered</th><th>Items removed (dead links)</th><th>New hosts</th><th>New seeds</th></tr></thead>
   <tbody>
     <?php foreach ($runs as $r): ?>
       <tr>
