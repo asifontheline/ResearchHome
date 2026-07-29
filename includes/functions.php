@@ -5,6 +5,35 @@ const HARVEST_USER_AGENT_BASE = 'ResHubBot/1.0 (+personal research catalog; resp
 define('HARVEST_USER_AGENT', HARVEST_USER_AGENT_BASE . (defined('CONTACT_EMAIL') && CONTACT_EMAIL !== 'you@example.com' ? '; contact: ' . CONTACT_EMAIL : ''));
 
 /**
+ * IP -> country/region/city via ip-api.com's free tier (no key, HTTP only,
+ * 45 req/min). Short timeout so a slow/down geo API can't stall a page
+ * load by more than a beat — on any failure this just returns null and the
+ * page view is still recorded without a location. The IP passed in is
+ * never persisted by the caller; only the resolved names are stored.
+ */
+function geolocate_ip(string $ip): ?array {
+    if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+        return null; // private/loopback/reserved — nothing to look up (local dev, etc.)
+    }
+    $ch = curl_init("http://ip-api.com/json/{$ip}?fields=status,country,regionName,city");
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 2,
+        CURLOPT_USERAGENT => 'ResHub/1.0',
+    ]);
+    $body = curl_exec($ch);
+    curl_close($ch);
+    if (!$body) return null;
+    $data = json_decode($body, true);
+    if (!is_array($data) || ($data['status'] ?? '') !== 'success') return null;
+    return [
+        'country' => $data['country'] ?? null,
+        'region' => $data['regionName'] ?? null,
+        'city' => $data['city'] ?? null,
+    ];
+}
+
+/**
  * MVP page-view logging — deliberately small (per explicit instruction:
  * build minimal, keep only if it proves useful, stall further effort
  * otherwise). Called from header.php, public pages only (admin's own
@@ -42,6 +71,18 @@ function record_page_view(): void {
         db()->prepare(
             'INSERT INTO page_views (path, item_id, visitor_hash, referrer_host) VALUES (?, ?, ?, ?)'
         )->execute([mb_strimwidth($path, 0, 255, ''), $itemId, $visitorHash, $referrerHost]);
+
+        // One geo lookup per unique visitor per day — geo_cache is keyed by
+        // the same rotating hash, so repeat page views from the same
+        // visitor today skip the network call entirely.
+        $cached = db()->prepare('SELECT 1 FROM geo_cache WHERE visitor_hash = ?');
+        $cached->execute([$visitorHash]);
+        if (!$cached->fetch()) {
+            $geo = geolocate_ip($ip);
+            db()->prepare(
+                'INSERT IGNORE INTO geo_cache (visitor_hash, country, region, city) VALUES (?, ?, ?, ?)'
+            )->execute([$visitorHash, $geo['country'] ?? null, $geo['region'] ?? null, $geo['city'] ?? null]);
+        }
     } catch (Throwable $e) {
         // Never let analytics logging break an actual page load.
     }
@@ -75,6 +116,15 @@ function get_traffic_summary(): array {
         "SELECT referrer_host, COUNT(*) AS views FROM page_views
          WHERE viewed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) AND referrer_host IS NOT NULL
          GROUP BY referrer_host ORDER BY views DESC LIMIT 10"
+    )->fetchAll();
+
+    $summary['top_locations'] = db()->query(
+        "SELECT g.country, g.region, g.city, COUNT(*) AS views, COUNT(DISTINCT pv.visitor_hash) AS unique_visitors
+         FROM page_views pv
+         JOIN geo_cache g ON g.visitor_hash = pv.visitor_hash
+         WHERE pv.viewed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) AND g.country IS NOT NULL
+         GROUP BY g.country, g.region, g.city
+         ORDER BY views DESC LIMIT 20"
     )->fetchAll();
 
     return $summary;

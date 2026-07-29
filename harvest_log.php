@@ -22,8 +22,9 @@ require __DIR__ . '/includes/header.php';
 <h2>Traffic</h2>
 <p class="muted">
   MVP page-view log (public visitors only, best-effort bot filtering, no raw IPs
-  stored). Started fresh with this deploy — numbers will fill in over the next
-  few days. Keeping this if it proves useful, stalling it otherwise.
+  stored — the IP is only used transiently to resolve a city/region/country via
+  ip-api.com, then discarded). Location tracking added <?= date('Y-m-d') ?>, trying
+  it for a week before deciding whether to keep it.
 </p>
 <table class="seed-table traffic-summary-table">
   <thead><tr><th></th><th>Views</th><th>Unique visitors</th></tr></thead>
@@ -69,6 +70,22 @@ require __DIR__ . '/includes/header.php';
       </ol>
     <?php else: ?>
       <p class="muted">None yet, or all direct/internal traffic.</p>
+    <?php endif; ?>
+  </div>
+  <div>
+    <h3>Top locations (7d)</h3>
+    <p class="muted" style="font-size:0.8rem;">City/region from IP geolocation, no IP retained. Trying this for a week.</p>
+    <?php if ($traffic['top_locations']): ?>
+      <ol class="credits-list source-credits-list">
+        <?php foreach ($traffic['top_locations'] as $loc): ?>
+          <li>
+            <?= h(array_filter([$loc['city'], $loc['region'], $loc['country']]) ? implode(', ', array_filter([$loc['city'], $loc['region'], $loc['country']])) : 'Unknown') ?>
+            (<?= (int)$loc['views'] ?> views, <?= (int)$loc['unique_visitors'] ?> visitors)
+          </li>
+        <?php endforeach; ?>
+      </ol>
+    <?php else: ?>
+      <p class="muted">No data yet.</p>
     <?php endif; ?>
   </div>
 </div>

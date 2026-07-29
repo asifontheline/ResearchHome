@@ -116,6 +116,19 @@ CREATE TABLE IF NOT EXISTS page_views (
     KEY idx_item_id (item_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Resolved location per visitor_hash (not per IP — the raw IP is never
+-- stored, only used transiently to call the geolocation API). Keyed by the
+-- same daily-rotating salted hash as page_views, so this doubles as a cache
+-- (one lookup per unique visitor per day) and never links a location back
+-- to a real IP address once written.
+CREATE TABLE IF NOT EXISTS geo_cache (
+    visitor_hash CHAR(64) PRIMARY KEY,
+    country VARCHAR(100) DEFAULT NULL,
+    region VARCHAR(100) DEFAULT NULL,
+    city VARCHAR(100) DEFAULT NULL,
+    looked_up_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- One row per harvest.php or discover.php run, for visibility since nothing
 -- is added by hand.
 CREATE TABLE IF NOT EXISTS harvest_log (
