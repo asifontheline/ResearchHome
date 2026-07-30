@@ -327,6 +327,19 @@ function insert_item_if_new(array $fields, array $tagNames = []): ?int {
 }
 
 /**
+ * "cs.LG" -> "Machine Learning (cs.LG)" — see includes/arxiv_categories.php
+ * for the rationale. Unknown codes (arXiv adds new ones occasionally) fall
+ * back to the raw code rather than erroring.
+ */
+function arxiv_category_label(string $code): string {
+    static $map = null;
+    if ($map === null) {
+        $map = require __DIR__ . '/arxiv_categories.php';
+    }
+    return isset($map[$code]) ? "{$map[$code]} ({$code})" : $code;
+}
+
+/**
  * Match subject keywords against a blob of text (title + abstract) and
  * return the slugs of subjects whose keywords appear.
  */

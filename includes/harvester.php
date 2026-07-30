@@ -218,10 +218,12 @@ function api_harvest_arxiv(string $subjectSlug, string $keyword, int $max = 8): 
         // arXiv's own declared category codes (e.g. cs.LG, astro-ph.CO) are a
         // richer, self-reported taxonomy than our seed keyword list — use them
         // directly instead of forcing every item into one of our subject slugs.
+        // Expanded to a plain-English label (see arxiv_category_label()) so a
+        // reader unfamiliar with arXiv's codes isn't left staring at "cs.LG".
         $arxivCategories = [];
         foreach ($entry->category as $cat) {
             $term = (string) $cat['term'];
-            if ($term !== '') $arxivCategories[] = $term;
+            if ($term !== '') $arxivCategories[] = arxiv_category_label($term);
         }
 
         $tags = array_unique(array_merge($arxivCategories, classify_subjects($title . ' ' . $abstract), array_filter([$subjectSlug])));
