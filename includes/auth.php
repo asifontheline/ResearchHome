@@ -2,6 +2,18 @@
 require_once __DIR__ . '/db.php';
 
 if (session_status() === PHP_SESSION_NONE) {
+    // Not guaranteed by the host's default php.ini — set explicitly rather
+    // than relying on it. HTTPS-conditional Secure flag so this doesn't
+    // break local dev over plain http.
+    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || ($_SERVER['SERVER_PORT'] ?? null) == 443;
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'secure' => $isHttps,
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
     session_start();
 }
 

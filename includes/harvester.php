@@ -296,8 +296,15 @@ function api_harvest_pubmed(string $subjectSlug, string $keyword, int $max = 8):
     $ids = json_decode($searchBody, true)['esearchresult']['idlist'] ?? [];
     if (!$ids) return ['added' => 0];
 
+    // NCBI caps unauthenticated callers at 3 req/sec (10/sec with an API
+    // key) — each fetch_pubmed() below is its own esummary request against
+    // the same host as the esearch call above, so a tight loop without this
+    // could exceed that within a single harvest run.
+    $minIntervalMicroseconds = (defined('NCBI_API_KEY') && NCBI_API_KEY) ? 110000 : 350000;
+
     $added = 0;
     foreach ($ids as $pmid) {
+        usleep($minIntervalMicroseconds);
         $meta = fetch_pubmed($pmid);
         if (!$meta || !$meta['title']) continue;
         $url = "https://pubmed.ncbi.nlm.nih.gov/{$pmid}/";

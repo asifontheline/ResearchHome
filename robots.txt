@@ -1,0 +1,11 @@
+User-agent: *
+Disallow: /login.php
+Disallow: /add.php
+Disallow: /edit.php
+Disallow: /delete.php
+Disallow: /seeds.php
+Disallow: /harvest_log.php
+Disallow: /harvest.php
+Disallow: /discover.php
+Disallow: /monitor.php
+Allow: /
