@@ -131,6 +131,25 @@ CREATE TABLE IF NOT EXISTS geo_cache (
     looked_up_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- A public search that returned zero results. The harvester picks these up
+-- (highest search_count first) and runs them as one-off keyword searches
+-- across the API sources, same as the regular subject rotation but without
+-- adding the search string itself as a tag. harvested_at marks it as
+-- attempted (not necessarily successful — items_found may still be 0 if
+-- nothing free/open exists for that query).
+CREATE TABLE IF NOT EXISTS search_misses (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    query VARCHAR(255) NOT NULL,
+    query_hash CHAR(64) NOT NULL,
+    first_searched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_searched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    search_count INT UNSIGNED NOT NULL DEFAULT 1,
+    harvested_at DATETIME DEFAULT NULL,
+    items_found INT UNSIGNED DEFAULT NULL,
+    UNIQUE KEY uniq_query_hash (query_hash),
+    KEY idx_harvested_at (harvested_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- One row per harvest.php or discover.php run, for visibility since nothing
 -- is added by hand.
 CREATE TABLE IF NOT EXISTS harvest_log (

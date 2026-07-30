@@ -6,6 +6,10 @@ require_login();
 $runs = db()->query('SELECT * FROM harvest_log ORDER BY started_at DESC LIMIT 50')->fetchAll();
 $activity = get_harvest_activity_by_source(30);
 $traffic = get_traffic_summary();
+$searchMisses = db()->query(
+    "SELECT query, search_count, first_searched_at, harvested_at, items_found
+     FROM search_misses ORDER BY harvested_at IS NULL DESC, search_count DESC, first_searched_at DESC LIMIT 20"
+)->fetchAll();
 
 $pageTitle = 'Harvest log';
 require __DIR__ . '/includes/header.php';
@@ -89,6 +93,34 @@ require __DIR__ . '/includes/header.php';
     <?php endif; ?>
   </div>
 </div>
+
+<hr class="section-divider">
+
+<h2>Zero-result searches</h2>
+<p class="muted">
+  Public searches with no matches get queued here; the harvester tries each one
+  (highest search_count first, up to 3 per run) as a direct keyword search across
+  the API sources. "Harvested" means attempted, not necessarily successful —
+  items_found may still be 0 if nothing free/open exists for that query.
+</p>
+<?php if ($searchMisses): ?>
+  <table class="seed-table">
+    <thead><tr><th>Query</th><th>Times searched</th><th>First searched</th><th>Status</th><th>Items found</th></tr></thead>
+    <tbody>
+      <?php foreach ($searchMisses as $sm): ?>
+        <tr>
+          <td><?= h($sm['query']) ?></td>
+          <td><?= (int)$sm['search_count'] ?></td>
+          <td><?= h($sm['first_searched_at']) ?></td>
+          <td><?= $sm['harvested_at'] ? 'harvested ' . h($sm['harvested_at']) : 'pending' ?></td>
+          <td><?= $sm['items_found'] === null ? '—' : (int)$sm['items_found'] ?></td>
+        </tr>
+      <?php endforeach; ?>
+    </tbody>
+  </table>
+<?php else: ?>
+  <p class="muted">None yet.</p>
+<?php endif; ?>
 
 <hr class="section-divider">
 

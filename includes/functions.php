@@ -88,6 +88,45 @@ function record_page_view(): void {
     }
 }
 
+/**
+ * A public search returned nothing. Queue it so the next harvest run(s)
+ * can try it as a one-off keyword search across the API sources — see
+ * harvest_search_misses() in harvester.php. Dedup by lowercased query via
+ * query_hash; repeats just bump search_count, which the harvester uses to
+ * prioritize the most-requested misses first.
+ */
+function record_search_miss(string $q): void {
+    $q = trim(mb_strimwidth($q, 0, 255, ''));
+    if ($q === '') return;
+    $hash = hash('sha256', mb_strtolower($q));
+    try {
+        db()->prepare(
+            'INSERT INTO search_misses (query, query_hash) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE search_count = search_count + 1, last_searched_at = NOW()'
+        )->execute([$q, $hash]);
+    } catch (Throwable $e) {
+        // Never let this break the search page itself.
+    }
+}
+
+/**
+ * Direct search links on other free/open portals, for when we genuinely
+ * have nothing yet — a positive next step instead of a dead end while the
+ * queued search above waits for the next harvest run.
+ */
+function external_search_portals(string $q): array {
+    $enc = urlencode($q);
+    return [
+        'Google Scholar' => "https://scholar.google.com/scholar?q={$enc}",
+        'Semantic Scholar' => "https://www.semanticscholar.org/search?q={$enc}&sort=relevance",
+        'OpenAlex' => "https://openalex.org/works?search={$enc}",
+        'arXiv' => "https://arxiv.org/search/?query={$enc}&searchtype=all",
+        'PubMed' => "https://pubmed.ncbi.nlm.nih.gov/?term={$enc}",
+        'CORE' => "https://core.ac.uk/search?q={$enc}",
+        'BASE' => "https://www.base-search.net/Search/Results?lookfor={$enc}",
+    ];
+}
+
 function get_traffic_summary(): array {
     $windows = ['today' => 'CURDATE()', 'last_7_days' => 'DATE_SUB(NOW(), INTERVAL 7 DAY)', 'last_30_days' => 'DATE_SUB(NOW(), INTERVAL 30 DAY)'];
     $summary = [];

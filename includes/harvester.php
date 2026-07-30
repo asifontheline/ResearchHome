@@ -224,7 +224,7 @@ function api_harvest_arxiv(string $subjectSlug, string $keyword, int $max = 8): 
             if ($term !== '') $arxivCategories[] = $term;
         }
 
-        $tags = array_unique(array_merge($arxivCategories, classify_subjects($title . ' ' . $abstract), [$subjectSlug]));
+        $tags = array_unique(array_merge($arxivCategories, classify_subjects($title . ' ' . $abstract), array_filter([$subjectSlug])));
         $id = insert_item_if_new([
             'title' => $title, 'url' => $url,
             'authors' => implode(', ', $authors), 'abstract' => $abstract,
@@ -265,7 +265,7 @@ function api_harvest_crossref(string $subjectSlug, string $keyword, int $max = 8
         // many records — use them alongside our keyword classification rather
         // than only the one subject slug that produced this search.
         $crossrefSubjects = $msg['subject'] ?? [];
-        $tags = array_unique(array_merge($crossrefSubjects, classify_subjects($title . ' ' . $abstract), [$subjectSlug]));
+        $tags = array_unique(array_merge($crossrefSubjects, classify_subjects($title . ' ' . $abstract), array_filter([$subjectSlug])));
 
         $id = insert_item_if_new([
             'title' => $title, 'url' => $url,
@@ -299,7 +299,7 @@ function api_harvest_pubmed(string $subjectSlug, string $keyword, int $max = 8):
         $meta = fetch_pubmed($pmid);
         if (!$meta || !$meta['title']) continue;
         $url = "https://pubmed.ncbi.nlm.nih.gov/{$pmid}/";
-        $tags = array_unique(array_merge(classify_subjects($meta['title']), [$subjectSlug]));
+        $tags = array_unique(array_merge(classify_subjects($meta['title']), array_filter([$subjectSlug])));
         $id = insert_item_if_new([
             'title' => $meta['title'], 'url' => $url,
             'authors' => $meta['authors'], 'abstract' => $meta['abstract'],
@@ -348,7 +348,7 @@ function api_harvest_openalex(string $subjectSlug, string $keyword, int $max = 8
         $abstract = reconstruct_openalex_abstract($work['abstract_inverted_index'] ?? null);
         $topics = array_map(fn($t) => $t['display_name'] ?? '', $work['topics'] ?? []);
 
-        $tags = array_unique(array_merge(array_filter($topics), classify_subjects($title . ' ' . ($abstract ?? '')), [$subjectSlug]));
+        $tags = array_unique(array_merge(array_filter($topics), classify_subjects($title . ' ' . ($abstract ?? '')), array_filter([$subjectSlug])));
 
         $id = insert_item_if_new([
             'title' => $title, 'url' => $url,
@@ -389,7 +389,7 @@ function api_harvest_semanticscholar(string $subjectSlug, string $keyword, int $
         $authors = array_map(fn($a) => $a['name'] ?? '', $paper['authors'] ?? []);
         $fieldsOfStudy = array_filter($paper['fieldsOfStudy'] ?? []);
 
-        $tags = array_unique(array_merge($fieldsOfStudy, classify_subjects($title . ' ' . ($paper['abstract'] ?? '')), [$subjectSlug]));
+        $tags = array_unique(array_merge($fieldsOfStudy, classify_subjects($title . ' ' . ($paper['abstract'] ?? '')), array_filter([$subjectSlug])));
 
         $id = insert_item_if_new([
             'title' => $title, 'url' => $url,
@@ -432,7 +432,7 @@ function api_harvest_patentsview(string $subjectSlug, string $keyword, int $max 
         if (!$title || !$patentId) continue;
 
         $inventors = array_map(fn($i) => $i['inventor_name_last'] ?? '', $p['inventors'] ?? []);
-        $tags = array_unique(array_merge(classify_subjects($title . ' ' . ($p['patent_abstract'] ?? '')), [$subjectSlug]));
+        $tags = array_unique(array_merge(classify_subjects($title . ' ' . ($p['patent_abstract'] ?? '')), array_filter([$subjectSlug])));
 
         $id = insert_item_if_new([
             'title' => $title,
@@ -518,6 +518,54 @@ function run_api_harvest(array $subjects, int $perSourceMax = 5, int $subjectsPe
         $errors[] = 'Stopped early: time budget exceeded — remaining sources resume next run.';
     }
     return ['added' => $added, 'errors' => $errors, 'subjects' => $batch, 'skipped' => array_unique($skipped)];
+}
+
+/**
+ * Fulfills queued zero-result public searches (see record_search_miss() in
+ * functions.php) by running each one as a one-off keyword search across the
+ * same API sources as the regular subject rotation. Uses its own cooldown
+ * namespace per source (independent of the subject rotation's) so this
+ * doesn't compete with or get blocked by the regular harvest's per-source
+ * cooldowns within the same run. Passing '' as the subjectSlug means the
+ * search query itself never gets added as a tag (see array_filter([$subjectSlug])
+ * in each api_harvest_* function) — only whatever real subjects/topics the
+ * results themselves classify into.
+ */
+function harvest_search_misses(int $maxQueries = 3, int $perSourceMax = 5, ?float $deadline = null): array {
+    $sources = [
+        'api_harvest_arxiv', 'api_harvest_crossref', 'api_harvest_pubmed',
+        'api_harvest_openalex', 'api_harvest_semanticscholar', 'api_harvest_patentsview',
+    ];
+
+    $rows = db()->query(
+        "SELECT id, query FROM search_misses WHERE harvested_at IS NULL
+         ORDER BY search_count DESC, first_searched_at ASC LIMIT " . (int)$maxQueries
+    )->fetchAll();
+
+    $added = 0;
+    $errors = [];
+    foreach ($rows as $row) {
+        if ($deadline !== null && time_budget_exceeded($deadline)) break;
+        $queryAdded = 0;
+        foreach ($sources as $fn) {
+            if ($deadline !== null && time_budget_exceeded($deadline)) break 2;
+            $searchSourceKey = "{$fn}_search";
+            if (!source_ready($searchSourceKey, 1800)) continue;
+            mark_source_called($searchSourceKey);
+            try {
+                $result = $fn('', $row['query'], $perSourceMax);
+                $queryAdded += $result['added'];
+                if (!empty($result['error'])) $errors[] = "{$fn}(search:\"{$row['query']}\"): {$result['error']}";
+            } catch (Throwable $e) {
+                db(true);
+                $errors[] = "{$fn}(search:\"{$row['query']}\"): " . $e->getMessage();
+            }
+        }
+        db()->prepare('UPDATE search_misses SET harvested_at = NOW(), items_found = ? WHERE id = ?')
+            ->execute([$queryAdded, $row['id']]);
+        $added += $queryAdded;
+    }
+    return ['added' => $added, 'errors' => $errors, 'queries_processed' => count($rows)];
 }
 
 // ---- Source discovery: find new seeds, feed the harvester ---------------
@@ -915,6 +963,10 @@ function run_content_harvest(): array {
         if ($api['skipped']) {
             $errors[] = 'Skipped (called within the last hour): ' . implode(', ', $api['skipped']);
         }
+
+        $searchMisses = harvest_search_misses(3, 5, $deadline);
+        $itemsAdded += $searchMisses['added'];
+        $errors = array_merge($errors, $searchMisses['errors']);
 
         $seeds = crawl_due_seeds(3, $deadline);
         $linksDiscovered = $seeds['discovered'];

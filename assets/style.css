@@ -278,6 +278,19 @@ nav { display: flex; gap: 1rem; }
 }
 
 .empty-state { color: var(--muted); }
+.search-empty-state { max-width: 600px; margin: 0 auto; text-align: center; }
+.search-empty-state p { color: var(--muted); margin-bottom: 1rem; }
+.portal-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; list-style: none; padding: 0; }
+.portal-links a {
+  display: inline-block;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+.portal-links a:hover { border-color: var(--accent); }
 
 .item-detail h1 { margin-bottom: 0.25rem; }
 .item-abstract-full, .item-notes { max-width: 70ch; }

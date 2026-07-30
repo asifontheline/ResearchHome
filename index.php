@@ -29,6 +29,14 @@ $countStmt->execute($params);
 $totalItems = (int) $countStmt->fetchColumn();
 $totalPages = max(1, (int) ceil($totalItems / $perPage));
 
+// A real text search with nothing back — queue it for the harvester to try
+// as a one-off keyword search (see harvest_search_misses() in harvester.php).
+// A tag filter with no matches isn't a "search miss" in that sense, so this
+// only fires for the q= case.
+if ($q !== '' && $totalItems === 0) {
+    record_search_miss($q);
+}
+
 $page = max(1, min($totalPages, (int) ($_GET['page'] ?? 1)));
 $offset = ($page - 1) * $perPage;
 
@@ -123,7 +131,16 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
     </p>
   <?php endif; ?>
 
-  <?php if (!$items): ?>
+  <?php if (!$items && $q !== ''): ?>
+    <div class="empty-state search-empty-state">
+      <p>No matches yet for &ldquo;<?= h($q) ?>&rdquo; — we've queued this search for the harvester to try directly. Check back soon, or search these free/open portals now:</p>
+      <ul class="portal-links">
+        <?php foreach (external_search_portals($q) as $label => $url): ?>
+          <li><a href="<?= h($url) ?>" target="_blank" rel="noopener noreferrer"><?= h($label) ?></a></li>
+        <?php endforeach; ?>
+      </ul>
+    </div>
+  <?php elseif (!$items): ?>
     <p class="empty-state">Nothing here yet. <?php if (current_user()): ?><a href="/add.php">Add your first item</a>.<?php endif; ?></p>
   <?php endif; ?>
 
