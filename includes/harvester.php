@@ -273,6 +273,7 @@ function api_harvest_crossref(string $subjectSlug, string $keyword, int $max = 8
             'abstract' => $abstract ?: null,
             'source_name' => $msg['publisher'] ?? 'Crossref',
             'published_date' => $published,
+            'citation_count' => $msg['is-referenced-by-count'] ?? null,
         ], $tags);
         if ($id) $added++;
     }
@@ -355,6 +356,7 @@ function api_harvest_openalex(string $subjectSlug, string $keyword, int $max = 8
             'abstract' => $abstract,
             'source_name' => $work['primary_location']['source']['display_name'] ?? 'OpenAlex',
             'published_date' => $work['publication_date'] ?? null,
+            'citation_count' => $work['cited_by_count'] ?? null,
         ], $tags);
         if ($id) $added++;
     }
@@ -370,7 +372,7 @@ function api_harvest_openalex(string $subjectSlug, string $keyword, int $max = 8
 
 function api_harvest_semanticscholar(string $subjectSlug, string $keyword, int $max = 8): array {
     $q = urlencode($keyword);
-    $fields = 'title,abstract,authors,year,externalIds,openAccessPdf,url,fieldsOfStudy';
+    $fields = 'title,abstract,authors,year,externalIds,openAccessPdf,url,fieldsOfStudy,citationCount';
     $headers = (defined('SEMANTIC_SCHOLAR_API_KEY') && SEMANTIC_SCHOLAR_API_KEY)
         ? ['x-api-key: ' . SEMANTIC_SCHOLAR_API_KEY] : [];
     $body = safe_http_get("https://api.semanticscholar.org/graph/v1/paper/search?query={$q}&limit={$max}&fields={$fields}", $headers);
@@ -395,6 +397,7 @@ function api_harvest_semanticscholar(string $subjectSlug, string $keyword, int $
             'abstract' => $paper['abstract'] ?? null,
             'source_name' => 'Semantic Scholar',
             'published_date' => isset($paper['year']) ? "{$paper['year']}-01-01" : null,
+            'citation_count' => $paper['citationCount'] ?? null,
         ], $tags);
         if ($id) $added++;
     }

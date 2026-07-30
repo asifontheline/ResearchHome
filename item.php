@@ -29,6 +29,7 @@ require __DIR__ . '/includes/header.php';
   <p class="item-meta">
     <?php if ($item['source_name']): ?><span class="source"><?= h($item['source_name']) ?></span><?php endif; ?>
     <?php if ($item['published_date']): ?><span class="date"><?= h($item['published_date']) ?></span><?php endif; ?>
+    <?php if ($item['citation_count'] !== null): ?><span class="citations"><?= number_format((int)$item['citation_count']) ?> citation<?= (int)$item['citation_count'] === 1 ? '' : 's' ?></span><?php endif; ?>
     <span class="date">added <?= h(substr($item['added_at'], 0, 10)) ?></span>
   </p>
   <?php if ($item['authors']): ?><p class="item-authors"><?= h($item['authors']) ?></p><?php endif; ?>

@@ -4,6 +4,7 @@ require_once __DIR__ . '/includes/auth.php';
 
 $q = trim($_GET['q'] ?? '');
 $tagSlug = trim($_GET['tag'] ?? '');
+$sort = ($_GET['sort'] ?? '') === 'citations' ? 'citations' : 'recency';
 $perPage = 24;
 
 $joinClause = '';
@@ -31,8 +32,12 @@ $totalPages = max(1, (int) ceil($totalItems / $perPage));
 $page = max(1, min($totalPages, (int) ($_GET['page'] ?? 1)));
 $offset = ($page - 1) * $perPage;
 
+// citation_count is NULL for sources that don't report one (arXiv, PubMed,
+// patents) — MySQL sorts NULL as lowest, so DESC naturally puts those items
+// last rather than letting them crowd out ranked ones at the top.
+$orderBy = $sort === 'citations' ? 'i.citation_count DESC, i.added_at DESC' : 'i.added_at DESC';
 $sql = "SELECT DISTINCT i.* FROM items i{$joinClause}{$whereClause}
-        ORDER BY i.added_at DESC LIMIT {$perPage} OFFSET {$offset}";
+        ORDER BY {$orderBy} LIMIT {$perPage} OFFSET {$offset}";
 
 $stmt = db()->prepare($sql);
 $stmt->execute($params);
@@ -40,12 +45,22 @@ $items = $stmt->fetchAll();
 
 $grouped = get_grouped_subjects();
 
-/** Builds a pagination link preserving the current q/tag filters. */
-function paginate_url(int $page, string $q, string $tagSlug): string {
+/** Builds a pagination link preserving the current q/tag/sort filters. */
+function paginate_url(int $page, string $q, string $tagSlug, string $sort = 'recency'): string {
     $params = ['page' => $page];
     if ($q !== '') $params['q'] = $q;
     if ($tagSlug !== '') $params['tag'] = $tagSlug;
+    if ($sort !== 'recency') $params['sort'] = $sort;
     return '/index.php?' . http_build_query($params);
+}
+
+/** Builds a sort-toggle link preserving the current q/tag filters, resetting to page 1. */
+function sort_url(string $sort, string $q, string $tagSlug): string {
+    $params = [];
+    if ($q !== '') $params['q'] = $q;
+    if ($tagSlug !== '') $params['tag'] = $tagSlug;
+    if ($sort !== 'recency') $params['sort'] = $sort;
+    return '/index.php' . ($params ? '?' . http_build_query($params) : '');
 }
 
 $pageTitle = 'Browse';
@@ -99,6 +114,12 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
     <p class="result-count">
       <?= number_format($totalItems) ?> item<?= $totalItems === 1 ? '' : 's' ?>
       <?php if ($totalPages > 1): ?> — page <?= $page ?> of <?= number_format($totalPages) ?><?php endif; ?>
+      <span class="sort-toggle">
+        Sort:
+        <a class="<?= $sort === 'recency' ? 'active' : '' ?>" href="<?= h(sort_url('recency', $q, $tagSlug)) ?>">Newest</a>
+        &middot;
+        <a class="<?= $sort === 'citations' ? 'active' : '' ?>" href="<?= h(sort_url('citations', $q, $tagSlug)) ?>">Most cited</a>
+      </span>
     </p>
   <?php endif; ?>
 
@@ -117,6 +138,7 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
         <p class="item-meta">
           <?php if ($item['source_name']): ?><span class="source"><?= h($item['source_name']) ?></span><?php endif; ?>
           <?php if ($item['published_date']): ?><span class="date"><?= h($item['published_date']) ?></span><?php endif; ?>
+          <?php if ($item['citation_count'] !== null): ?><span class="citations"><?= number_format((int)$item['citation_count']) ?> citation<?= (int)$item['citation_count'] === 1 ? '' : 's' ?></span><?php endif; ?>
         </p>
         <?php if ($item['authors']): ?><p class="item-authors"><?= h($item['authors']) ?></p><?php endif; ?>
         <?php if ($item['abstract']): ?><p class="item-abstract"><?= h(mb_strimwidth($item['abstract'], 0, 220, '…')) ?></p><?php endif; ?>
@@ -132,7 +154,7 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
   <?php if ($totalPages > 1): ?>
     <nav class="pagination" aria-label="Pagination">
       <?php if ($page > 1): ?>
-        <a href="<?= h(paginate_url($page - 1, $q, $tagSlug)) ?>">&laquo; Prev</a>
+        <a href="<?= h(paginate_url($page - 1, $q, $tagSlug, $sort)) ?>">&laquo; Prev</a>
       <?php else: ?>
         <span class="pagination-disabled">&laquo; Prev</span>
       <?php endif; ?>
@@ -142,7 +164,7 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
         $windowEnd = min($totalPages, $page + 2);
       ?>
       <?php if ($windowStart > 1): ?>
-        <a href="<?= h(paginate_url(1, $q, $tagSlug)) ?>">1</a>
+        <a href="<?= h(paginate_url(1, $q, $tagSlug, $sort)) ?>">1</a>
         <?php if ($windowStart > 2): ?><span class="pagination-ellipsis">&hellip;</span><?php endif; ?>
       <?php endif; ?>
 
@@ -150,17 +172,17 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
         <?php if ($p === $page): ?>
           <span class="pagination-current"><?= $p ?></span>
         <?php else: ?>
-          <a href="<?= h(paginate_url($p, $q, $tagSlug)) ?>"><?= $p ?></a>
+          <a href="<?= h(paginate_url($p, $q, $tagSlug, $sort)) ?>"><?= $p ?></a>
         <?php endif; ?>
       <?php endfor; ?>
 
       <?php if ($windowEnd < $totalPages): ?>
         <?php if ($windowEnd < $totalPages - 1): ?><span class="pagination-ellipsis">&hellip;</span><?php endif; ?>
-        <a href="<?= h(paginate_url($totalPages, $q, $tagSlug)) ?>"><?= number_format($totalPages) ?></a>
+        <a href="<?= h(paginate_url($totalPages, $q, $tagSlug, $sort)) ?>"><?= number_format($totalPages) ?></a>
       <?php endif; ?>
 
       <?php if ($page < $totalPages): ?>
-        <a href="<?= h(paginate_url($page + 1, $q, $tagSlug)) ?>">Next &raquo;</a>
+        <a href="<?= h(paginate_url($page + 1, $q, $tagSlug, $sort)) ?>">Next &raquo;</a>
       <?php else: ?>
         <span class="pagination-disabled">Next &raquo;</span>
       <?php endif; ?>

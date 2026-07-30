@@ -260,8 +260,8 @@ function insert_item_if_new(array $fields, array $tagNames = []): ?int {
     }
 
     $stmt = $pdo->prepare(
-        'INSERT INTO items (title, url, url_hash, authors, abstract, notes, source_name, published_date, image_url)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO items (title, url, url_hash, authors, abstract, notes, source_name, published_date, image_url, citation_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $stmt->execute([
         mb_strimwidth($fields['title'] ?? 'Untitled', 0, 512, ''),
@@ -273,6 +273,7 @@ function insert_item_if_new(array $fields, array $tagNames = []): ?int {
         $fields['source_name'] ?? null,
         $fields['published_date'] ?? null,
         $fields['image_url'] ?? null,
+        $fields['citation_count'] ?? null,
     ]);
     $itemId = (int) $pdo->lastInsertId();
     if ($itemId <= 0) {

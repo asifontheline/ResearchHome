@@ -23,9 +23,11 @@ CREATE TABLE IF NOT EXISTS items (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     last_checked_at DATETIME DEFAULT NULL,      -- last time the outbound link was verified reachable
     failed_checks TINYINT UNSIGNED NOT NULL DEFAULT 0, -- consecutive failures; item is removed past a threshold
+    citation_count INT UNSIGNED DEFAULT NULL,   -- from source metadata where available (OpenAlex, Semantic Scholar, Crossref); NULL where the source doesn't report one (arXiv, PubMed, patents)
     UNIQUE KEY uniq_url_hash (url_hash),
     KEY idx_added_at (added_at),
     KEY idx_last_checked_at (last_checked_at),
+    KEY idx_citation_count (citation_count),
     FULLTEXT KEY ft_search (title, authors, abstract, notes)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
