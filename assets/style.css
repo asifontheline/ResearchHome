@@ -390,6 +390,7 @@ nav { display: flex; gap: 1rem; }
   padding: 0.3rem 0.7rem; font-size: 0.8rem; cursor: pointer;
 }
 .map-zoom-reset:hover { border-color: var(--accent); color: var(--accent); }
+.map-hint { font-size: 0.75rem; margin-left: 0.25rem; }
 
 .world-map-viewport {
   max-width: 100%;
@@ -398,7 +399,11 @@ nav { display: flex; gap: 1rem; }
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
+.world-map-viewport.dragging { cursor: grabbing; }
 .world-map-wrap {
   position: relative;
   width: 900px;

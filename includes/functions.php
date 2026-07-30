@@ -232,18 +232,21 @@ function render_world_map(array $points, string $domId): string {
         );
     }
     // Zoom via CSS transform: scale on a fixed-px-width inner wrap, inside a
-    // scrolling viewport — no map/JS library, just enough vanilla JS to move
-    // a scale number and let native scrollbars handle panning once zoomed.
+    // scrolling viewport — no map/JS library. Panning is drag-to-scroll
+    // (Pointer Events move viewport.scrollLeft/Top directly) since relying
+    // on the native scrollbars alone made the map feel stuck growing only
+    // toward the top-left corner as it zoomed.
     return sprintf(
         '<div class="map-toolbar" data-map="%1$s">
             <button type="button" class="map-zoom-btn" data-zoom="-1" aria-label="Zoom out">&minus;</button>
             <span class="map-zoom-level" id="%1$s-level">100%%</span>
             <button type="button" class="map-zoom-btn" data-zoom="1" aria-label="Zoom in">+</button>
             <button type="button" class="map-zoom-reset">Reset</button>
+            <span class="map-hint muted">Drag to pan</span>
         </div>
         <div class="world-map-viewport" id="%1$s-viewport">
             <div class="world-map-wrap" id="%1$s-wrap">
-                <img src="/assets/world-map.svg" class="world-map-bg" alt="World map" width="784" height="459" loading="lazy">
+                <img src="/assets/world-map.svg" class="world-map-bg" alt="World map" width="784" height="459" loading="lazy" draggable="false">
                 <svg class="world-map-dots" viewBox="30.767 241.591 784.077 458.627" preserveAspectRatio="xMidYMid meet" aria-hidden="true">%2$s</svg>
             </div>
         </div>
@@ -252,13 +255,20 @@ function render_world_map(array $points, string $domId): string {
         (function () {
             var id = %3$s;
             var wrap = document.getElementById(id + "-wrap");
+            var viewport = document.getElementById(id + "-viewport");
             var level = document.getElementById(id + "-level");
             var toolbar = document.querySelector(\'.map-toolbar[data-map="\' + id + \'"]\');
             var zoom = 1;
+
             function apply() {
                 wrap.style.transform = "scale(" + zoom + ")";
                 level.textContent = Math.round(zoom * 100) + "%%";
             }
+            function center() {
+                viewport.scrollLeft = (wrap.offsetWidth * zoom - viewport.clientWidth) / 2;
+                viewport.scrollTop = (wrap.offsetHeight * zoom - viewport.clientHeight) / 2;
+            }
+
             toolbar.querySelectorAll(".map-zoom-btn").forEach(function (btn) {
                 btn.addEventListener("click", function () {
                     zoom = Math.max(1, Math.min(4, zoom + parseFloat(btn.dataset.zoom) * 0.5));
@@ -268,7 +278,32 @@ function render_world_map(array $points, string $domId): string {
             toolbar.querySelector(".map-zoom-reset").addEventListener("click", function () {
                 zoom = 1;
                 apply();
+                center();
             });
+
+            // Drag-to-pan in any direction (mouse + touch via Pointer Events).
+            var dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+            viewport.addEventListener("pointerdown", function (e) {
+                dragging = true;
+                startX = e.clientX; startY = e.clientY;
+                startLeft = viewport.scrollLeft; startTop = viewport.scrollTop;
+                viewport.classList.add("dragging");
+                viewport.setPointerCapture(e.pointerId);
+            });
+            viewport.addEventListener("pointermove", function (e) {
+                if (!dragging) return;
+                viewport.scrollLeft = startLeft - (e.clientX - startX);
+                viewport.scrollTop = startTop - (e.clientY - startY);
+            });
+            function endDrag() {
+                dragging = false;
+                viewport.classList.remove("dragging");
+            }
+            viewport.addEventListener("pointerup", endDrag);
+            viewport.addEventListener("pointercancel", endDrag);
+
+            apply();
+            center();
         })();
         </script>',
         h($domId), $dots, json_encode($domId)
