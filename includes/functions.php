@@ -281,9 +281,16 @@ function url_hash(string $url): string {
 
 /**
  * Insert an item if its URL hasn't been seen before. Returns the item id,
- * or null if it was already present (dedup by url_hash).
+ * or null if it was already present (dedup by url_hash) or the title is
+ * junk (see is_junk_title() — checked here, centrally, so it applies
+ * regardless of which source/path the item came through, not just the
+ * crawler's own generic-HTML-metadata path).
  */
 function insert_item_if_new(array $fields, array $tagNames = []): ?int {
+    if (is_junk_title($fields['title'] ?? '')) {
+        return null;
+    }
+
     // One captured connection for the whole operation — lastInsertId() is
     // only valid on the exact connection that did the INSERT, so this must
     // not call db() again in between (a reconnect elsewhere swapping the
@@ -722,6 +729,29 @@ function fetch_crossref(string $doi): ?array {
     ];
 }
 
+/**
+ * Institutional repositories often serve a real <title> tag for records
+ * that are embargoed, under review, or otherwise have no actual metadata
+ * yet — "Title Pending" (University of Wollongong Library and others),
+ * "Untitled", a bare 404/access-denied page, etc. These aren't failed
+ * fetches (the HTTP request succeeds), so link-health checks wouldn't
+ * catch them — this is checked at crawl time instead, before the item
+ * ever gets inserted.
+ */
+function is_junk_title(string $title): bool {
+    $normalized = trim(mb_strtolower($title));
+    if (mb_strlen($normalized) < 3) return true;
+    $junkPatterns = [
+        'title pending', 'untitled', 'no title', 'coming soon',
+        '404', 'not found', 'page not found', 'access denied', 'forbidden',
+        'just a moment', 'attention required', 'are you a robot', 'error',
+    ];
+    foreach ($junkPatterns as $pattern) {
+        if (str_contains($normalized, $pattern)) return true;
+    }
+    return false;
+}
+
 function fetch_generic(string $url): ?array {
     $body = safe_http_get($url);
     if (!$body) return null;
@@ -747,6 +777,9 @@ function extract_generic_metadata(string $body, string $url): array {
     $title = $get_meta('og:title');
     if (!$title && preg_match('#<title[^>]*>(.*?)</title>#is', $body, $m)) {
         $title = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
+    }
+    if ($title !== null && is_junk_title($title)) {
+        $title = null; // caller treats a null title as "skip this page"
     }
 
     $host = parse_url($url, PHP_URL_HOST) ?: 'Web';
