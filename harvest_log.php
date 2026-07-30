@@ -10,6 +10,8 @@ $searchMisses = db()->query(
     "SELECT query, search_count, first_searched_at, harvested_at, items_found
      FROM search_misses ORDER BY harvested_at IS NULL DESC, search_count DESC, first_searched_at DESC LIMIT 20"
 )->fetchAll();
+$mapPointsToday = get_traffic_map_points('today');
+$mapPointsAll = get_traffic_map_points('all');
 
 $pageTitle = 'Harvest log';
 require __DIR__ . '/includes/header.php';
@@ -38,6 +40,17 @@ require __DIR__ . '/includes/header.php';
     <tr><td>Last 30 days</td><td><?= number_format($traffic['last_30_days']['views']) ?></td><td><?= number_format($traffic['last_30_days']['unique_visitors']) ?></td></tr>
   </tbody>
 </table>
+
+<div class="traffic-maps">
+  <div>
+    <h3>Today</h3>
+    <?= render_world_map($mapPointsToday, 'world-map-today') ?>
+  </div>
+  <div>
+    <h3>All time</h3>
+    <?= render_world_map($mapPointsAll, 'world-map-all') ?>
+  </div>
+</div>
 
 <div class="traffic-columns">
   <div>

@@ -15,7 +15,7 @@ function geolocate_ip(string $ip): ?array {
     if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
         return null; // private/loopback/reserved — nothing to look up (local dev, etc.)
     }
-    $ch = curl_init("http://ip-api.com/json/{$ip}?fields=status,country,regionName,city");
+    $ch = curl_init("http://ip-api.com/json/{$ip}?fields=status,country,regionName,city,lat,lon");
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 2,
@@ -30,6 +30,8 @@ function geolocate_ip(string $ip): ?array {
         'country' => $data['country'] ?? null,
         'region' => $data['regionName'] ?? null,
         'city' => $data['city'] ?? null,
+        'lat' => $data['lat'] ?? null,
+        'lon' => $data['lon'] ?? null,
     ];
 }
 
@@ -80,8 +82,11 @@ function record_page_view(): void {
         if (!$cached->fetch()) {
             $geo = geolocate_ip($ip);
             db()->prepare(
-                'INSERT IGNORE INTO geo_cache (visitor_hash, country, region, city) VALUES (?, ?, ?, ?)'
-            )->execute([$visitorHash, $geo['country'] ?? null, $geo['region'] ?? null, $geo['city'] ?? null]);
+                'INSERT IGNORE INTO geo_cache (visitor_hash, country, region, city, lat, lon) VALUES (?, ?, ?, ?, ?, ?)'
+            )->execute([
+                $visitorHash, $geo['country'] ?? null, $geo['region'] ?? null, $geo['city'] ?? null,
+                $geo['lat'] ?? null, $geo['lon'] ?? null,
+            ]);
         }
     } catch (Throwable $e) {
         // Never let analytics logging break an actual page load.
@@ -167,6 +172,73 @@ function get_traffic_summary(): array {
     )->fetchAll();
 
     return $summary;
+}
+
+/**
+ * Visit counts grouped by rounded lat/lon (1 decimal, ~11km) so nearby
+ * visitors within the same city collapse into one dot instead of a
+ * scatter of overlapping points at the same city center. $window is
+ * 'today' or 'all'.
+ */
+function get_traffic_map_points(string $window): array {
+    $since = $window === 'today' ? "WHERE pv.viewed_at >= CURDATE()" : '';
+    return db()->query(
+        "SELECT ROUND(g.lat, 1) AS lat, ROUND(g.lon, 1) AS lon,
+                MAX(g.city) AS city, MAX(g.country) AS country,
+                COUNT(*) AS views, COUNT(DISTINCT pv.visitor_hash) AS unique_visitors
+         FROM page_views pv
+         JOIN geo_cache g ON g.visitor_hash = pv.visitor_hash
+         {$since}
+         " . ($window === 'today' ? 'AND' : 'WHERE') . " g.lat IS NOT NULL AND g.lon IS NOT NULL
+         GROUP BY ROUND(g.lat, 1), ROUND(g.lon, 1)
+         ORDER BY views DESC"
+    )->fetchAll();
+}
+
+/**
+ * Renders traffic points as dots over assets/world-map.svg (CC BY-SA 3.0,
+ * Al MacDonald / Fritz Lekschas — see the file's own <desc> for full
+ * attribution). Uses a linear equirectangular fit calibrated against that
+ * specific file's coordinate space (derived from known reference points,
+ * e.g. UK/Australia bounding-box centers) — not a general lat/lon formula,
+ * only valid for this exact SVG's viewBox.
+ */
+function latlon_to_map_xy(float $lat, float $lon): array {
+    $x = 2.3289 * $lon + 406.446;
+    $y = -3.0583 * $lat + 547.114;
+    // Clamp to the map's own viewBox so a stray/erroneous coordinate can't
+    // draw a dot floating off in blank space outside the artwork.
+    $x = max(30.767, min(814.844, $x));
+    $y = max(241.591, min(700.218, $y));
+    return [$x, $y];
+}
+
+function render_world_map(array $points, string $domId): string {
+    if (!$points) {
+        return '<p class="muted">No geolocated visits yet.</p>';
+    }
+    $maxViews = max(array_column($points, 'views'));
+    $dots = '';
+    foreach ($points as $p) {
+        if ($p['lat'] === null || $p['lon'] === null) continue;
+        [$x, $y] = latlon_to_map_xy((float)$p['lat'], (float)$p['lon']);
+        // sqrt scaling: area (not radius) proportional to views, so one
+        // outlier city doesn't visually swallow the rest of the map.
+        $r = 2.5 + 7 * sqrt($p['views'] / $maxViews);
+        $label = trim(($p['city'] ?? '') . ', ' . ($p['country'] ?? ''), ', ');
+        $dots .= sprintf(
+            '<circle cx="%.2f" cy="%.2f" r="%.2f" class="geo-dot"><title>%s: %d view%s</title></circle>',
+            $x, $y, $r, h($label ?: 'Unknown'), (int)$p['views'], (int)$p['views'] === 1 ? '' : 's'
+        );
+    }
+    return sprintf(
+        '<div class="world-map-wrap">
+            <img src="/assets/world-map.svg" class="world-map-bg" alt="World map" width="784" height="459" loading="lazy">
+            <svg class="world-map-dots" viewBox="30.767 241.591 784.077 458.627" preserveAspectRatio="xMidYMid meet" aria-hidden="true" id="%s">%s</svg>
+        </div>
+        <p class="muted map-credit">Map: Al MacDonald / Fritz Lekschas, CC BY-SA 3.0. Dot size ~ views, city-level precision.</p>',
+        h($domId), $dots
+    );
 }
 
 function slugify(string $text): string {

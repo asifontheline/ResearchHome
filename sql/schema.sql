@@ -128,6 +128,8 @@ CREATE TABLE IF NOT EXISTS geo_cache (
     country VARCHAR(100) DEFAULT NULL,
     region VARCHAR(100) DEFAULT NULL,
     city VARCHAR(100) DEFAULT NULL,
+    lat DECIMAL(7,4) DEFAULT NULL,    -- city-level precision from the geo API, not exact address
+    lon DECIMAL(7,4) DEFAULT NULL,
     looked_up_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
