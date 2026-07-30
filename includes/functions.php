@@ -45,6 +45,14 @@ function geolocate_ip(string $ip): ?array {
  * this is for a rough sense of traffic, not ad-tech-grade analytics.
  */
 function record_page_view(): void {
+    // Owner's own devices opt out via a persistent cookie (see notrack.php)
+    // rather than IP allowlisting — mobile carrier IPs rotate constantly
+    // and a laptop's IP changes across networks, so IP-based exclusion
+    // wouldn't hold up in practice.
+    if (!empty($_COOKIE['reshub_notrack'])) {
+        return;
+    }
+
     $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
     if ($ua === '' || preg_match('/bot|crawl|spider|slurp|facebookexternalhit|whatsapp|preview/i', $ua)) {
         return;

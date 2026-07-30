@@ -8,4 +8,5 @@ Disallow: /harvest_log.php
 Disallow: /harvest.php
 Disallow: /discover.php
 Disallow: /monitor.php
+Disallow: /notrack.php
 Allow: /

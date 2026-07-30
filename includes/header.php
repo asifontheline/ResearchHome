@@ -42,6 +42,7 @@ if (!current_user()) {
       <?php if (current_user()): ?>
         <a href="/harvest_log.php">Harvest log</a>
         <a href="/seeds.php">Seeds</a>
+        <a href="/notrack.php">Exclude device</a>
         <a href="/add.php">+ Add</a>
         <a href="/logout.php">Log out</a>
       <?php endif; ?>
