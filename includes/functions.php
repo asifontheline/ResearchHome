@@ -231,13 +231,47 @@ function render_world_map(array $points, string $domId): string {
             $x, $y, $r, h($label ?: 'Unknown'), (int)$p['views'], (int)$p['views'] === 1 ? '' : 's'
         );
     }
+    // Zoom via CSS transform: scale on a fixed-px-width inner wrap, inside a
+    // scrolling viewport — no map/JS library, just enough vanilla JS to move
+    // a scale number and let native scrollbars handle panning once zoomed.
     return sprintf(
-        '<div class="world-map-wrap">
-            <img src="/assets/world-map.svg" class="world-map-bg" alt="World map" width="784" height="459" loading="lazy">
-            <svg class="world-map-dots" viewBox="30.767 241.591 784.077 458.627" preserveAspectRatio="xMidYMid meet" aria-hidden="true" id="%s">%s</svg>
+        '<div class="map-toolbar" data-map="%1$s">
+            <button type="button" class="map-zoom-btn" data-zoom="-1" aria-label="Zoom out">&minus;</button>
+            <span class="map-zoom-level" id="%1$s-level">100%%</span>
+            <button type="button" class="map-zoom-btn" data-zoom="1" aria-label="Zoom in">+</button>
+            <button type="button" class="map-zoom-reset">Reset</button>
         </div>
-        <p class="muted map-credit">Map: Al MacDonald / Fritz Lekschas, CC BY-SA 3.0. Dot size ~ views, city-level precision.</p>',
-        h($domId), $dots
+        <div class="world-map-viewport" id="%1$s-viewport">
+            <div class="world-map-wrap" id="%1$s-wrap">
+                <img src="/assets/world-map.svg" class="world-map-bg" alt="World map" width="784" height="459" loading="lazy">
+                <svg class="world-map-dots" viewBox="30.767 241.591 784.077 458.627" preserveAspectRatio="xMidYMid meet" aria-hidden="true">%2$s</svg>
+            </div>
+        </div>
+        <p class="muted map-credit">Map: Al MacDonald / Fritz Lekschas, CC BY-SA 3.0. Dot size ~ views, city-level precision.</p>
+        <script>
+        (function () {
+            var id = %3$s;
+            var wrap = document.getElementById(id + "-wrap");
+            var level = document.getElementById(id + "-level");
+            var toolbar = document.querySelector(\'.map-toolbar[data-map="\' + id + \'"]\');
+            var zoom = 1;
+            function apply() {
+                wrap.style.transform = "scale(" + zoom + ")";
+                level.textContent = Math.round(zoom * 100) + "%%";
+            }
+            toolbar.querySelectorAll(".map-zoom-btn").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    zoom = Math.max(1, Math.min(4, zoom + parseFloat(btn.dataset.zoom) * 0.5));
+                    apply();
+                });
+            });
+            toolbar.querySelector(".map-zoom-reset").addEventListener("click", function () {
+                zoom = 1;
+                apply();
+            });
+        })();
+        </script>',
+        h($domId), $dots, json_encode($domId)
     );
 }
 
