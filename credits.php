@@ -92,5 +92,11 @@ require __DIR__ . '/includes/header.php';
 
 <h2>Infrastructure</h2>
 <p class="muted">Built with PHP and MySQL. No tracking, no ads, no accounts beyond a single admin login for the person running this instance.</p>
+<p class="muted">
+  Page translation is provided by
+  <a href="https://translate.google.com" target="_blank" rel="noopener noreferrer">Google Translate</a>,
+  free and unaffiliated with this project — machine-translated, so accuracy
+  varies by language.
+</p>
 
 <?php require __DIR__ . '/includes/footer.php'; ?>

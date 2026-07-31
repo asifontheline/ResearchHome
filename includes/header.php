@@ -21,9 +21,17 @@ if (!isset($_COOKIE['googtrans'])) {
     if (preg_match('/^[a-z]{2}$/', $preferredLang) && $preferredLang !== 'en') {
         setcookie('googtrans', '/en/' . $preferredLang, [
             'expires' => time() + 30 * 24 * 3600, 'path' => '/', 'secure' => is_https(),
-            'httponly' => false, 'samesite' => 'Lax', // false: Google's widget JS reads/writes this itself
+            'httponly' => false, 'samesite' => 'Lax', // false: our own JS below reads/writes this too
         ]);
+        $_COOKIE['googtrans'] = '/en/' . $preferredLang; // so the select below reflects it on this same load
     }
+}
+// Pre-select our dropdown to match whatever's already active (auto-detected
+// above, or a prior choice), so it doesn't always show "Original" for a
+// returning visitor who's already translated.
+$currentLangCode = 'en';
+if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE['googtrans'], $m)) {
+    $currentLangCode = $m[1];
 }
 ?>
 <!doctype html>
@@ -42,7 +50,33 @@ if (!isset($_COOKIE['googtrans'])) {
     <input type="text" name="q" placeholder="Search title, authors, abstract, notes…" value="<?= h($_GET['q'] ?? '') ?>">
     <button type="submit">Search</button>
   </form>
-  <div id="google_translate_element" class="translate-toggle" translate="no"></div>
+  <div class="translate-toggle" translate="no">
+    <select id="reshub-lang-select" aria-label="Translate this page">
+      <option value="en">Original (English)</option>
+      <option value="es">Español</option>
+      <option value="fr">Français</option>
+      <option value="de">Deutsch</option>
+      <option value="pt">Português</option>
+      <option value="it">Italiano</option>
+      <option value="ru">Русский</option>
+      <option value="zh-CN">中文 (简体)</option>
+      <option value="ja">日本語</option>
+      <option value="ko">한국어</option>
+      <option value="ar">العربية</option>
+      <option value="hi">हिन्दी</option>
+      <option value="bn">বাংলা</option>
+      <option value="ur">اردو</option>
+      <option value="id">Bahasa Indonesia</option>
+      <option value="vi">Tiếng Việt</option>
+      <option value="tr">Türkçe</option>
+      <option value="nl">Nederlands</option>
+      <option value="pl">Polski</option>
+      <option value="th">ไทย</option>
+      <option value="sw">Kiswahili</option>
+    </select>
+    <script>document.getElementById('reshub-lang-select').value = <?= json_encode($currentLangCode) ?>;</script>
+  </div>
+  <div id="google_translate_element" style="display:none;"></div>
   <div class="header-right">
     <?php $summary = get_catalog_summary(); ?>
     <table class="summary-box">

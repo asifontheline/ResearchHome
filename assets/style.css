@@ -84,20 +84,22 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
 }
 
-/* Google's own widget, shown directly. */
-.translate-toggle { flex-shrink: 0; }
-
-/* The language-picker popup — verified via an actual headless-browser
-   test against the live site (not guessed): Google's real class here is
-   .skiptranslate, an inline-styled iframe set to an enormous fixed width
-   (2600px+, regardless of viewport) that's what actually caused the
-   "spans beyond full screen" report. Three earlier attempts guessed
-   .goog-te-combo / .goog-te-menu-frame / .goog-te-banner-frame — none of
-   those classes exist in this widget version at all, which is why they
-   had zero effect no matter how the rest of the approach changed.
-   Confirmed by screenshot (1280px and 390px viewports) that max-width
-   alone contains it correctly without needing to also force `left`. */
-iframe.skiptranslate { max-width: 96vw !important; }
+/* Google's own dropdown UI is never shown at all (#google_translate_element
+   stays display:none in header.php) — verified via headless-browser
+   testing that its SIMPLE layout renders an unscrollable ~2600px-wide grid
+   of every supported language, with no viable way to contain that without
+   clipping most of the list. This is our own compact <select> instead,
+   driving translation via the googtrans cookie (see footer.php) — a
+   native select can never overflow the viewport. */
+.translate-toggle select {
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.85rem;
+  max-width: 160px;
+}
 
 /* Summary box + nav share the far-right end of the header, so the box lives
    in the page's top-right corner without ever overlapping page content. */
