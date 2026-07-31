@@ -69,18 +69,19 @@ require __DIR__ . '/includes/header.php';
   was actually published — journals, university repositories, preprint
   servers. Every one of those gets credited here too, not just the discovery
   mechanism, with a live count of how many items in the catalog came from each.
-  Each name links to a real item harvested from that source — no publisher
-  homepage URL is stored anywhere in this catalog, so rather than guess one,
-  clicking through gets you to that publisher's own site via genuine,
-  verified content. It's also a fallback: if the harvester itself can't
-  reach a source on a given day (an outage, a changed API), this link still
-  works, since it doesn't depend on live harvesting to resolve.
+  Each name links to that source's own site — no publisher homepage URL is
+  stored anywhere in this catalog, so rather than guess one, this is derived
+  from a real item we actually harvested from them, keeping just the site
+  root rather than the specific item page (a deep link can rot even when the
+  site itself is fine). It's also a fallback: if the harvester can't reach a
+  source on a given day, this link still works, since it doesn't depend on
+  live harvesting to resolve.
 </p>
 <ol class="credits-list source-credits-list">
   <?php foreach ($sources as $s): ?>
     <li>
-      <?php if ($s['sample_url']): ?>
-        <a href="<?= h($s['sample_url']) ?>" target="_blank" rel="noopener noreferrer"><?= h($s['source_name']) ?></a>
+      <?php if ($s['homepage_url']): ?>
+        <a href="<?= h($s['homepage_url']) ?>" target="_blank" rel="noopener noreferrer"><?= h($s['source_name']) ?></a>
       <?php else: ?>
         <?= h($s['source_name']) ?>
       <?php endif; ?>

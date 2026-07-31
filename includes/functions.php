@@ -493,14 +493,17 @@ function get_item_tags(int $itemId): array {
 /**
  * No publisher-homepage URL is ever harvested or stored — source_name is a
  * free-text string from the API (Crossref's publisher field, OpenAlex's
- * host org, etc.), not a URL. So rather than guessing/fabricating a
- * homepage link, each source links to one real item we actually harvested
- * from it (the most recent) — a genuine, verified URL, and a way for a
- * visitor to reach that publisher directly even on a day the harvester
- * itself can't (source down, API outage, etc.).
+ * host org, etc.), not a URL. Linking to a specific harvested item's deep
+ * URL was tried and rejected — those rot (a repository reorganizes, an
+ * item page moves) even when the site itself is fine. Deriving just the
+ * site root (scheme://host/) from a real harvested URL is far more
+ * durable: homepages essentially never go dead the way a specific deep
+ * link can. For DOI-resolved sources this yields https://doi.org/ (all of
+ * them share that host) — less specific, but truthful and never broken,
+ * rather than guessing an individual publisher's actual domain.
  */
 function all_contributing_sources(): array {
-    return db()->query(
+    $rows = db()->query(
         "SELECT i.source_name, COUNT(*) AS item_count,
                 SUBSTRING_INDEX(GROUP_CONCAT(i.url ORDER BY i.added_at DESC), ',', 1) AS sample_url
          FROM items i
@@ -508,6 +511,14 @@ function all_contributing_sources(): array {
          GROUP BY i.source_name
          ORDER BY item_count DESC, i.source_name ASC"
     )->fetchAll();
+
+    foreach ($rows as &$row) {
+        $parts = $row['sample_url'] ? parse_url($row['sample_url']) : null;
+        $row['homepage_url'] = ($parts && !empty($parts['scheme']) && !empty($parts['host']))
+            ? "{$parts['scheme']}://{$parts['host']}/"
+            : null;
+    }
+    return $rows;
 }
 
 function all_tags_with_counts(): array {
