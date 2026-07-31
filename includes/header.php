@@ -11,9 +11,9 @@ if (!current_user()) {
 // header — a more reliable "region" signal than guessing from IP-derived
 // country (a country can have many languages; Accept-Language is literally
 // what the browser sends for exactly this purpose). Only sets this once:
-// if the googtrans cookie already exists, the visitor (or a prior choice in
-// our own dropdown below) already made a choice — never override that on a
-// later page load.
+// if the googtrans cookie already exists, a choice was already made
+// (Google's own widget writes this cookie itself when used) — never
+// override that on a later page load.
 if (!isset($_COOKIE['googtrans'])) {
     $acceptLang = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '';
     $firstTag = strtolower(trim(explode(';', explode(',', $acceptLang)[0])[0]));
@@ -21,17 +21,9 @@ if (!isset($_COOKIE['googtrans'])) {
     if (preg_match('/^[a-z]{2}$/', $preferredLang) && $preferredLang !== 'en') {
         setcookie('googtrans', '/en/' . $preferredLang, [
             'expires' => time() + 30 * 24 * 3600, 'path' => '/', 'secure' => is_https(),
-            'httponly' => false, 'samesite' => 'Lax', // false: our own JS below reads/writes this too
+            'httponly' => false, 'samesite' => 'Lax', // false: Google's widget JS reads/writes this itself
         ]);
-        $_COOKIE['googtrans'] = '/en/' . $preferredLang; // so the select below reflects it on this same load
     }
-}
-// Pre-select our own dropdown to match whatever's already active, so a
-// returning visitor (or one who just got auto-detected above) sees the
-// dropdown reflect reality instead of always showing "Original".
-$currentLangCode = 'en';
-if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE['googtrans'], $m)) {
-    $currentLangCode = $m[1];
 }
 ?>
 <!doctype html>
@@ -50,33 +42,7 @@ if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE
     <input type="text" name="q" placeholder="Search title, authors, abstract, notes…" value="<?= h($_GET['q'] ?? '') ?>">
     <button type="submit">Search</button>
   </form>
-  <div class="translate-toggle" translate="no">
-    <select id="reshub-lang-select" aria-label="Translate this page">
-      <option value="en">Original (English)</option>
-      <option value="es">Español</option>
-      <option value="fr">Français</option>
-      <option value="de">Deutsch</option>
-      <option value="pt">Português</option>
-      <option value="it">Italiano</option>
-      <option value="ru">Русский</option>
-      <option value="zh-CN">中文 (简体)</option>
-      <option value="ja">日本語</option>
-      <option value="ko">한국어</option>
-      <option value="ar">العربية</option>
-      <option value="hi">हिन्दी</option>
-      <option value="bn">বাংলা</option>
-      <option value="ur">اردو</option>
-      <option value="id">Bahasa Indonesia</option>
-      <option value="vi">Tiếng Việt</option>
-      <option value="tr">Türkçe</option>
-      <option value="nl">Nederlands</option>
-      <option value="pl">Polski</option>
-      <option value="th">ไทย</option>
-      <option value="sw">Kiswahili</option>
-    </select>
-    <script>document.getElementById('reshub-lang-select').value = <?= json_encode($currentLangCode) ?>;</script>
-  </div>
-  <div id="google_translate_element" class="goog-te-hidden"></div>
+  <div id="google_translate_element" class="translate-toggle" translate="no"></div>
   <div class="header-right">
     <?php $summary = get_catalog_summary(); ?>
     <table class="summary-box">

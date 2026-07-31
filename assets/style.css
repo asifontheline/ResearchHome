@@ -81,41 +81,24 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
 }
 
-/* Google's own dropdown/menu UI doesn't reflow responsively and was
-   overflowing past the viewport edge — so its rendered UI is never shown
-   (#google_translate_element stays display:none in header.php); this is
-   our own <select> instead, driven programmatically. */
-.translate-toggle select {
-  padding: 0.5rem 0.7rem;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text);
-  font-size: 0.85rem;
-  max-width: 160px;
-}
+/* Google's own widget, shown directly (two attempts at hiding it and
+   driving a custom control instead both proved unreliable — see
+   footer.php). Constrain what's ours to control; the popup menu itself
+   (.goog-te-menu-frame below) is a separate fixed-position iframe Google
+   appends to <body>, outside this container entirely. */
+.translate-toggle { max-width: 140px; overflow: hidden; }
 
-/* Google's own dropdown/menu UI doesn't reflow responsively and was
-   overflowing past the viewport edge, so it's never shown — but this must
-   stay visually-hidden-yet-rendered (not display:none), since Google's
-   script measures/renders the container during init and a fully hidden
-   one caused inconsistent initialization: some languages silently failed
-   to apply, and driving it without a full page reload didn't work at all.
-   This is the standard "hidden but laid out" technique for exactly that
-   reason (same one used for visually-hidden-but-accessible content). */
-.goog-te-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-}
+/* The language-picker popup is a cross-origin iframe positioned by
+   Google's own inline JS — its internal content can't be restyled, but
+   forcing the outer frame to fit the viewport at least stops it from
+   extending past the screen edge on narrow/mobile widths (the original
+   overflow complaint), even if that means the iframe's own content needs
+   its own internal scrollbar. */
+.goog-te-menu-frame { max-width: 96vw !important; }
 
-/* Defensive: Google's script can still inject a top notification banner
-   (a fixed-position iframe) once translation is active, separate from the
-   dropdown UI above — hidden so it can't push page content down or
-   introduce its own overflow/width issues. */
+/* Defensive: Google's script can also inject a top notification banner
+   (a separate fixed-position iframe) once translation is active — hidden
+   so it can't push page content down or introduce its own width issues. */
 .goog-te-banner-frame { display: none !important; }
 body { top: 0 !important; }
 
