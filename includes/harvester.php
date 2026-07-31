@@ -796,12 +796,34 @@ function process_queue_batch(int $limit = 20, ?float $deadline = null): array {
             break; // remaining rows stay 'pending', picked up next run
         }
         try {
-            // Checked before can_crawl_url() touches the hosts table, so it
-            // reflects whether we'd ever seen this host prior to this run.
+            // Checked before touching the hosts table, so it reflects
+            // whether we'd ever seen this host prior to this run.
             $hostIsNew = !host_known_before_this_run($row['host']);
 
-            if (!can_crawl_url($row['url'])) {
-                continue; // leave pending, try again on a later run once the host cools down
+            $parts = parse_url($row['url']);
+            $path = $parts['path'] ?? '/';
+            $hostRow = get_or_fetch_host($row['host']);
+
+            // robots.txt disallow is a *permanent* verdict for this URL —
+            // marking it 'skipped' resolves it for good. Previously this
+            // fell through to a bare `continue`, leaving the row 'pending'
+            // forever; since the queue is FIFO (oldest first) and only
+            // $limit rows get pulled per run, permanently-disallowed URLs
+            // piled up at the front and starved every legitimately
+            // fetchable URL behind them from ever being tried (confirmed on
+            // production: ~4,000 pending rows, arxiv.org/search and
+            // similar robots-disallowed paths stuck at the head of the
+            // queue since the very first crawl).
+            if (!robots_path_allowed($hostRow, $path)) {
+                db()->prepare("UPDATE crawl_queue SET status='skipped', processed_at=NOW(), error='robots.txt disallow' WHERE id=?")
+                    ->execute([$row['id']]);
+                continue;
+            }
+
+            // Crawl-delay not yet elapsed is transient — genuinely leave
+            // this one 'pending' to retry once the host cools down.
+            if (!host_ready_to_crawl($hostRow)) {
+                continue;
             }
 
             $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
@@ -981,7 +1003,13 @@ function run_content_harvest(): array {
         $linksDiscovered = $seeds['discovered'];
         $errors = array_merge($errors, $seeds['errors']);
 
-        $queue = process_queue_batch(20, $deadline);
+        // Was 20 — sized for a much more frequent cron cadence. Now that
+        // harvest is capped to one run per hour, 20/run would take the
+        // ~4,000-item backlog (see the robots.txt-starvation fix above)
+        // roughly 8+ days to drain even after unblocking it. The deadline
+        // budget (59 min) easily absorbs a much larger batch since a fetch
+        // is a couple seconds at most.
+        $queue = process_queue_batch(150, $deadline);
         $itemsAdded += $queue['added'];
         $queueErrors = $queue['errors'];
 
