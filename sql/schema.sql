@@ -133,6 +133,16 @@ CREATE TABLE IF NOT EXISTS geo_cache (
     looked_up_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Fixed-window per-IP request counter — see enforce_request_rate_limit() in
+-- functions.php. Deliberately separate from geo_cache/page_views (those are
+-- daily-rotating and privacy-oriented); this just needs a short-lived,
+-- stable-for-a-few-seconds key to stop a burst from hammering the server.
+CREATE TABLE IF NOT EXISTS request_throttle (
+    throttle_key CHAR(64) PRIMARY KEY,
+    window_start DATETIME NOT NULL,
+    request_count INT UNSIGNED NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- A public search that returned zero results. The harvester picks these up
 -- (highest search_count first) and runs them as one-off keyword searches
 -- across the API sources, same as the regular subject rotation but without

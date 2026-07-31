@@ -1,6 +1,72 @@
 <?php
 require_once __DIR__ . '/db.php';
 
+/**
+ * Per-IP request throttle — runs before any page does its own (potentially
+ * expensive) queries, since functions.php is the first require in every
+ * entry point. This protects the server itself, not just the traffic
+ * numbers: a UA-spoofing scraper logged 135 requests in ~10 seconds on
+ * 2026-07-31, each one a full page render (item listing, tag joins, etc.)
+ * — on shared hosting that's real load, and enough of it can trip the
+ * host's own resource limits and 508 the whole site for everyone, not just
+ * the offender. record_page_view()'s 1/sec log-dedup only fixed the
+ * *reported numbers*; this fixes the actual load.
+ *
+ * No APCu on this host (checked), so this is a small DB-backed fixed-
+ * window counter — one cheap read+write per request, negligible next to
+ * an actual page's own queries. Deliberately independent of the
+ * daily-rotating analytics visitor_hash (that one's for anonymity; this
+ * one just needs a stable per-IP key for the duration of one window).
+ */
+function enforce_request_rate_limit(int $maxRequests = 20, int $windowSeconds = 10): void {
+    if (PHP_SAPI === 'cli') return; // never gate cron/CLI invocations (harvest.php, discover.php)
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+    if ($ip === '') return;
+
+    $salt = defined('APP_SECRET') ? APP_SECRET : 'no-secret';
+    $key = hash('sha256', $ip . $salt . 'throttle');
+
+    try {
+        $pdo = db();
+
+        // No cron for this table, so it never gets cleaned up on its own —
+        // 1-in-200 odds per request is cheap and keeps it bounded to
+        // recently-active IPs without a dedicated maintenance job.
+        if (random_int(1, 200) === 1) {
+            $pdo->exec('DELETE FROM request_throttle WHERE window_start < DATE_SUB(NOW(), INTERVAL 1 HOUR)');
+        }
+
+        $stmt = $pdo->prepare('SELECT window_start, request_count FROM request_throttle WHERE throttle_key = ?');
+        $stmt->execute([$key]);
+        $row = $stmt->fetch();
+
+        $windowExpired = !$row || strtotime($row['window_start']) <= time() - $windowSeconds;
+        if ($windowExpired) {
+            $pdo->prepare(
+                'INSERT INTO request_throttle (throttle_key, window_start, request_count) VALUES (?, NOW(), 1)
+                 ON DUPLICATE KEY UPDATE window_start = NOW(), request_count = 1'
+            )->execute([$key]);
+            return;
+        }
+
+        $newCount = (int)$row['request_count'] + 1;
+        $pdo->prepare('UPDATE request_throttle SET request_count = ? WHERE throttle_key = ?')->execute([$newCount, $key]);
+
+        if ($newCount > $maxRequests) {
+            http_response_code(429);
+            header('Retry-After: ' . $windowSeconds);
+            header('Content-Type: text/plain; charset=UTF-8');
+            echo "Too many requests — please slow down.";
+            exit;
+        }
+    } catch (Throwable $e) {
+        // A throttle-table hiccup must never take the whole site down —
+        // fail open rather than blocking legitimate traffic on a DB blip.
+        return;
+    }
+}
+enforce_request_rate_limit();
+
 const HARVEST_USER_AGENT_BASE = 'ResHubBot/1.0 (+personal research catalog; respects robots.txt)';
 define('HARVEST_USER_AGENT', HARVEST_USER_AGENT_BASE . (defined('CONTACT_EMAIL') && CONTACT_EMAIL !== 'you@example.com' ? '; contact: ' . CONTACT_EMAIL : ''));
 
