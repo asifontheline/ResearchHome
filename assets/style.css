@@ -81,6 +81,10 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
 }
 
+/* Google's Website Translator widget renders into this — a cross-origin
+   iframe internally, so only outer sizing/alignment is ours to control. */
+.translate-toggle { display: flex; align-items: center; font-size: 0.85rem; }
+
 /* Summary box + nav share the far-right end of the header, so the box lives
    in the page's top-right corner without ever overlapping page content. */
 .header-right { display: flex; align-items: center; gap: 1rem; margin-left: auto; flex-wrap: wrap; }

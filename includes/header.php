@@ -6,6 +6,25 @@ require_once __DIR__ . '/functions.php';
 if (!current_user()) {
     record_page_view();
 }
+
+// Auto-suggest a translation language from the browser's own Accept-Language
+// header — a more reliable "region" signal than guessing from IP-derived
+// country (a country can have many languages; Accept-Language is literally
+// what the browser sends for exactly this purpose). Only sets this once:
+// if the googtrans cookie already exists, the visitor (or Google Translate's
+// own widget, when they pick something from the dropdown) already made a
+// choice — never override that on a later page load.
+if (!isset($_COOKIE['googtrans'])) {
+    $acceptLang = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '';
+    $firstTag = strtolower(trim(explode(';', explode(',', $acceptLang)[0])[0]));
+    $preferredLang = explode('-', $firstTag)[0];
+    if (preg_match('/^[a-z]{2}$/', $preferredLang) && $preferredLang !== 'en') {
+        setcookie('googtrans', '/en/' . $preferredLang, [
+            'expires' => time() + 30 * 24 * 3600, 'path' => '/', 'secure' => is_https(),
+            'httponly' => false, 'samesite' => 'Lax', // false: Google's widget JS reads/writes this itself
+        ]);
+    }
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -23,6 +42,7 @@ if (!current_user()) {
     <input type="text" name="q" placeholder="Search title, authors, abstract, notes…" value="<?= h($_GET['q'] ?? '') ?>">
     <button type="submit">Search</button>
   </form>
+  <div id="google_translate_element" class="translate-toggle" translate="no"></div>
   <div class="header-right">
     <?php $summary = get_catalog_summary(); ?>
     <table class="summary-box">

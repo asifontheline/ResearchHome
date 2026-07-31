@@ -6,16 +6,15 @@ require_once __DIR__ . '/includes/auth.php';
 // section of harvest_log.php.
 
 $action = $_GET['action'] ?? 'on';
-$isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ($_SERVER['SERVER_PORT'] ?? null) == 443;
 
 if ($action === 'off') {
     setcookie('reshub_notrack', '', [
-        'expires' => time() - 3600, 'path' => '/', 'secure' => $isHttps, 'httponly' => true, 'samesite' => 'Lax',
+        'expires' => time() - 3600, 'path' => '/', 'secure' => is_https(), 'httponly' => true, 'samesite' => 'Lax',
     ]);
     $message = 'Tracking re-enabled on this device.';
 } else {
     setcookie('reshub_notrack', '1', [
-        'expires' => time() + 10 * 365 * 24 * 3600, 'path' => '/', 'secure' => $isHttps, 'httponly' => true, 'samesite' => 'Lax',
+        'expires' => time() + 10 * 365 * 24 * 3600, 'path' => '/', 'secure' => is_https(), 'httponly' => true, 'samesite' => 'Lax',
     ]);
     $message = "This device is now excluded from visitor tracking (page_views/geo_cache) — set once, sticks around for years, doesn't require staying logged in.";
 }

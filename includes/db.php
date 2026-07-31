@@ -11,6 +11,16 @@ require_once __DIR__ . '/../config.php';
 // rather than special-casing one server's timezone.
 date_default_timezone_set('UTC');
 
+/**
+ * Shared HTTPS check for cookie 'secure' flags — duplicated inline in three
+ * places before this (auth.php, notrack.php); centralized here since this
+ * is the one file every entry point loads first.
+ */
+function is_https(): bool {
+    return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || ($_SERVER['SERVER_PORT'] ?? null) == 443;
+}
+
 function create_db_connection(): PDO {
     // DB_SOCKET (optional) is the faster, more reliable path when the app
     // and MySQL run on the same server — set it in config.php to something
