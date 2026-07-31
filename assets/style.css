@@ -95,6 +95,23 @@ a:hover { text-decoration: underline; }
   max-width: 160px;
 }
 
+/* Google's own dropdown/menu UI doesn't reflow responsively and was
+   overflowing past the viewport edge, so it's never shown — but this must
+   stay visually-hidden-yet-rendered (not display:none), since Google's
+   script measures/renders the container during init and a fully hidden
+   one caused inconsistent initialization: some languages silently failed
+   to apply, and driving it without a full page reload didn't work at all.
+   This is the standard "hidden but laid out" technique for exactly that
+   reason (same one used for visually-hidden-but-accessible content). */
+.goog-te-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
 /* Defensive: Google's script can still inject a top notification banner
    (a fixed-position iframe) once translation is active, separate from the
    dropdown UI above — hidden so it can't push page content down or

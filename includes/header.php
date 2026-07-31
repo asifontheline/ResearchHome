@@ -76,7 +76,7 @@ if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE
     </select>
     <script>document.getElementById('reshub-lang-select').value = <?= json_encode($currentLangCode) ?>;</script>
   </div>
-  <div id="google_translate_element" style="display:none;"></div>
+  <div id="google_translate_element" class="goog-te-hidden"></div>
   <div class="header-right">
     <?php $summary = get_catalog_summary(); ?>
     <table class="summary-box">

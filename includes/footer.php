@@ -6,17 +6,15 @@
 </footer>
 <script>
 // Google's own dropdown/menu UI doesn't reflow responsively and can render
-// wider than the viewport (confirmed — it was overflowing on real pages).
-// So the widget itself stays hidden (#google_translate_element,
-// display:none in header.php) — it still does the actual translation work
-// (that part is cookie-driven, not UI-driven — this is the same mechanism
-// the server-side Accept-Language auto-detect in header.php already relies
-// on), we just never show its own UI. Trying to drive it by finding and
-// manipulating Google's internal <select class="goog-te-combo"> was tried
-// first and didn't reliably work — that element's availability/structure
-// isn't something to depend on. Setting the googtrans cookie and reloading
-// is the same thing Google's own dropdown does under the hood, and is what
-// the auto-detect feature already proves works.
+// wider than the viewport (confirmed — it was overflowing on real pages),
+// so it's never shown — but the container (#google_translate_element) must
+// stay visually-hidden-yet-rendered (.goog-te-hidden in style.css), not
+// display:none. A fully hidden container caused inconsistent init: some
+// languages silently failed to apply, and a reload-based cookie approach
+// (tried first) still had that same underlying flakiness plus a jarring
+// full-page-reload flash on every change. With proper (visible-but-clipped)
+// init, driving Google's own internal <select class="goog-te-combo">
+// directly works reliably and applies instantly, no reload.
 function googleTranslateElementInit() {
     new google.translate.TranslateElement({
         pageLanguage: 'en',
@@ -30,14 +28,32 @@ function googleTranslateElementInit() {
     if (!ourSelect) return;
 
     ourSelect.addEventListener('change', function () {
-        // /en/en (source=target) rather than deleting the cookie — deleting
-        // it would make header.php's Accept-Language auto-detect think no
-        // choice was ever made and silently re-translate on the very next
-        // page load, undoing "Original" the moment you navigate anywhere.
         var lang = ourSelect.value;
+
+        // Cookie too — not what applies translation on *this* page (the
+        // combo-box below does that, instantly), but what makes the choice
+        // stick on the *next* page navigated to, same mechanism the
+        // Accept-Language auto-detect in header.php relies on. /en/en
+        // (source=target) for "Original" rather than deleting it, so the
+        // auto-detect logic doesn't mistake "explicitly chose English" for
+        // "never chose anything" and silently re-translate later.
         var expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toUTCString();
         document.cookie = 'googtrans=/en/' + lang + '; expires=' + expires + '; path=/';
-        window.location.reload();
+
+        // Combo box only exists once Google's script has finished
+        // initializing — poll briefly rather than assuming it's ready.
+        var tries = 0;
+        var interval = setInterval(function () {
+            var combo = document.querySelector('#google_translate_element select.goog-te-combo');
+            tries++;
+            if (combo) {
+                clearInterval(interval);
+                combo.value = lang;
+                combo.dispatchEvent(new Event('change'));
+            } else if (tries > 40) {
+                clearInterval(interval); // ~10s, give up quietly — cookie above still applies on next navigation
+            }
+        }, 250);
     });
 })();
 </script>
