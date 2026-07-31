@@ -313,9 +313,13 @@ function render_world_map(array $points, string $domId): string {
         // outlier city doesn't visually swallow the rest of the map.
         $r = 2.5 + 7 * sqrt($p['views'] / $maxViews);
         $label = trim(($p['city'] ?? '') . ', ' . ($p['country'] ?? ''), ', ');
+        $tip = sprintf('%s: %d view%s', $label ?: 'Unknown', (int)$p['views'], (int)$p['views'] === 1 ? '' : 's');
+        // data-tip drives a custom JS tooltip below — native SVG <title>
+        // tooltips are unreliable across browsers (delayed, sometimes don't
+        // fire at all through a CSS transform like the zoom control uses).
         $dots .= sprintf(
-            '<circle cx="%.2f" cy="%.2f" r="%.2f" class="geo-dot"><title>%s: %d view%s</title></circle>',
-            $x, $y, $r, h($label ?: 'Unknown'), (int)$p['views'], (int)$p['views'] === 1 ? '' : 's'
+            '<circle cx="%.2f" cy="%.2f" r="%.2f" class="geo-dot" data-tip="%s"></circle>',
+            $x, $y, $r, h($tip)
         );
     }
     // Zoom via CSS transform: scale on a fixed-px-width inner wrap, inside a
@@ -334,8 +338,9 @@ function render_world_map(array $points, string $domId): string {
         <div class="world-map-viewport" id="%1$s-viewport">
             <div class="world-map-wrap" id="%1$s-wrap">
                 <img src="/assets/world-map.svg?v=%4$d" class="world-map-bg" alt="World map" width="784" height="459" loading="lazy" draggable="false">
-                <svg class="world-map-dots" viewBox="30.767 241.591 784.077 458.627" preserveAspectRatio="xMidYMid meet" aria-hidden="true">%2$s</svg>
+                <svg class="world-map-dots" id="%1$s-dots" viewBox="30.767 241.591 784.077 458.627" preserveAspectRatio="xMidYMid meet" aria-hidden="true">%2$s</svg>
             </div>
+            <div class="map-tooltip" id="%1$s-tooltip"></div>
         </div>
         <p class="muted map-credit">Map: Al MacDonald / Fritz Lekschas, CC BY-SA 3.0. Dot size ~ views, city-level precision.</p>
         <script>
@@ -344,6 +349,8 @@ function render_world_map(array $points, string $domId): string {
             var wrap = document.getElementById(id + "-wrap");
             var viewport = document.getElementById(id + "-viewport");
             var level = document.getElementById(id + "-level");
+            var dotsSvg = document.getElementById(id + "-dots");
+            var tooltip = document.getElementById(id + "-tooltip");
             var toolbar = document.querySelector(\'.map-toolbar[data-map="\' + id + \'"]\');
             var zoom = 1;
 
@@ -368,6 +375,31 @@ function render_world_map(array $points, string $domId): string {
                 center();
             });
 
+            // Custom tooltip — native SVG <title> is unreliable across
+            // browsers (delayed, sometimes silently doesn\'t fire, especially
+            // through the CSS transform: scale() the zoom control applies).
+            // Positioned relative to the viewport (not wrap) so it doesn\'t
+            // get scaled along with the map at higher zoom levels.
+            function positionTip(e) {
+                var rect = viewport.getBoundingClientRect();
+                tooltip.style.left = (e.clientX - rect.left + viewport.scrollLeft + 14) + "px";
+                tooltip.style.top = (e.clientY - rect.top + viewport.scrollTop + 10) + "px";
+            }
+            dotsSvg.addEventListener("pointerover", function (e) {
+                if (!e.target.classList || !e.target.classList.contains("geo-dot")) return;
+                tooltip.textContent = e.target.getAttribute("data-tip") || "";
+                tooltip.classList.add("visible");
+                positionTip(e);
+            });
+            dotsSvg.addEventListener("pointermove", function (e) {
+                if (!e.target.classList || !e.target.classList.contains("geo-dot")) return;
+                positionTip(e);
+            });
+            dotsSvg.addEventListener("pointerout", function (e) {
+                if (!e.target.classList || !e.target.classList.contains("geo-dot")) return;
+                tooltip.classList.remove("visible");
+            });
+
             // Drag-to-pan in any direction (mouse + touch via Pointer Events).
             var dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
             viewport.addEventListener("pointerdown", function (e) {
@@ -376,6 +408,7 @@ function render_world_map(array $points, string $domId): string {
                 startLeft = viewport.scrollLeft; startTop = viewport.scrollTop;
                 viewport.classList.add("dragging");
                 viewport.setPointerCapture(e.pointerId);
+                tooltip.classList.remove("visible");
             });
             viewport.addEventListener("pointermove", function (e) {
                 if (!dragging) return;

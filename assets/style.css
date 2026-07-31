@@ -393,6 +393,7 @@ nav { display: flex; gap: 1rem; }
 .map-hint { font-size: 0.75rem; margin-left: 0.25rem; }
 
 .world-map-viewport {
+  position: relative;
   max-width: 100%;
   max-height: 560px;
   overflow: auto;
@@ -404,6 +405,19 @@ nav { display: flex; gap: 1rem; }
   user-select: none;
 }
 .world-map-viewport.dragging { cursor: grabbing; }
+.map-tooltip {
+  position: absolute;
+  z-index: 5;
+  display: none;
+  padding: 0.3rem 0.55rem;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.75rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.map-tooltip.visible { display: block; }
 .world-map-wrap {
   position: relative;
   width: 900px;
