@@ -752,10 +752,27 @@ function crawl_due_seeds(int $limit = 3, ?float $deadline = null): array {
             db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = 0 WHERE id = ?')->execute([$seed['id']]);
 
             $links = extract_links($body, $seed['url']);
+            // Checking robots.txt here, not just later in process_queue_batch(),
+            // matters: confirmed on production that 79% of everything actually
+            // attempted from the queue was robots-disallowed (mostly /search,
+            // /list, /user-style utility paths a hub page links to alongside
+            // real content). Filtering those out before they ever become a
+            // queue row avoids paying for a full row + a future processing
+            // slot on something that was always going to be rejected.
+            $hostRowCache = [];
             foreach ($links as $link) {
                 $hash = url_hash($link['url']);
                 $linkHost = parse_url($link['url'], PHP_URL_HOST);
                 if (!$linkHost) continue;
+
+                if (!isset($hostRowCache[$linkHost])) {
+                    $hostRowCache[$linkHost] = get_or_fetch_host($linkHost);
+                }
+                $linkPath = parse_url($link['url'], PHP_URL_PATH) ?? '/';
+                if (!robots_path_allowed($hostRowCache[$linkHost], $linkPath)) {
+                    continue;
+                }
+
                 try {
                     db()->prepare(
                         'INSERT IGNORE INTO crawl_queue (url, url_hash, host, subject_slug) VALUES (?, ?, ?, ?)'
@@ -1017,7 +1034,13 @@ function run_content_harvest(): array {
         // roughly 8+ days to drain even after unblocking it. The deadline
         // budget (59 min) easily absorbs a much larger batch since a fetch
         // is a couple seconds at most.
-        $queue = process_queue_batch(150, $deadline);
+        // Was 150 — confirmed on production the backlog (4,771 pending
+        // across 402 hosts) is growing faster than that drains it, since
+        // seeds discover more per run than this processes. The deadline
+        // check inside the loop still bails out safely if this ever runs
+        // long, so raising the nominal cap just means more gets attempted
+        // when there's time budget to spare, not a hard commitment.
+        $queue = process_queue_batch(300, $deadline);
         $itemsAdded += $queue['added'];
         $queueErrors = $queue['errors'];
 
