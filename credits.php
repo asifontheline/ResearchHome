@@ -68,11 +68,24 @@ require __DIR__ . '/includes/header.php';
   The 6 APIs above find content, but the content itself comes from wherever it
   was actually published — journals, university repositories, preprint
   servers. Every one of those gets credited here too, not just the discovery
-  mechanism, with a live count of how many items in the catalog came from each:
+  mechanism, with a live count of how many items in the catalog came from each.
+  Each name links to a real item harvested from that source — no publisher
+  homepage URL is stored anywhere in this catalog, so rather than guess one,
+  clicking through gets you to that publisher's own site via genuine,
+  verified content. It's also a fallback: if the harvester itself can't
+  reach a source on a given day (an outage, a changed API), this link still
+  works, since it doesn't depend on live harvesting to resolve.
 </p>
 <ol class="credits-list source-credits-list">
   <?php foreach ($sources as $s): ?>
-    <li><?= h($s['source_name']) ?> (<?= (int)$s['item_count'] ?>)</li>
+    <li>
+      <?php if ($s['sample_url']): ?>
+        <a href="<?= h($s['sample_url']) ?>" target="_blank" rel="noopener noreferrer"><?= h($s['source_name']) ?></a>
+      <?php else: ?>
+        <?= h($s['source_name']) ?>
+      <?php endif; ?>
+      (<?= (int)$s['item_count'] ?>)
+    </li>
   <?php endforeach; ?>
 </ol>
 

@@ -490,13 +490,23 @@ function get_item_tags(int $itemId): array {
  * core API mechanisms that do the pulling. Matches the "Sources" count in
  * get_catalog_summary() exactly (both count DISTINCT source_name on items).
  */
+/**
+ * No publisher-homepage URL is ever harvested or stored — source_name is a
+ * free-text string from the API (Crossref's publisher field, OpenAlex's
+ * host org, etc.), not a URL. So rather than guessing/fabricating a
+ * homepage link, each source links to one real item we actually harvested
+ * from it (the most recent) — a genuine, verified URL, and a way for a
+ * visitor to reach that publisher directly even on a day the harvester
+ * itself can't (source down, API outage, etc.).
+ */
 function all_contributing_sources(): array {
     return db()->query(
-        "SELECT source_name, COUNT(*) AS item_count
-         FROM items
-         WHERE source_name IS NOT NULL
-         GROUP BY source_name
-         ORDER BY item_count DESC, source_name ASC"
+        "SELECT i.source_name, COUNT(*) AS item_count,
+                SUBSTRING_INDEX(GROUP_CONCAT(i.url ORDER BY i.added_at DESC), ',', 1) AS sample_url
+         FROM items i
+         WHERE i.source_name IS NOT NULL
+         GROUP BY i.source_name
+         ORDER BY item_count DESC, i.source_name ASC"
     )->fetchAll();
 }
 
