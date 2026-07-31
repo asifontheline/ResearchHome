@@ -999,7 +999,15 @@ function run_content_harvest(): array {
         $itemsAdded += $searchMisses['added'];
         $errors = array_merge($errors, $searchMisses['errors']);
 
-        $seeds = crawl_due_seeds(3, $deadline);
+        // Was 3 — at that rate, with 119 active seeds and harvest capped to
+        // one run/hour, a seed could go 40+ hours between attempts, and the
+        // 24 that had literally never been crawled once would take 8 hours
+        // just to all get their first try. Sized well above the current
+        // active-seed count so every seed gets touched at least once per
+        // run; the deadline check inside the loop still protects against
+        // this ever eating the whole time budget if the seed list grows a
+        // lot further.
+        $seeds = crawl_due_seeds(200, $deadline);
         $linksDiscovered = $seeds['discovered'];
         $errors = array_merge($errors, $seeds['errors']);
 
