@@ -78,6 +78,19 @@ function record_page_view(): void {
     }
 
     try {
+        // UA-string bot filtering isn't airtight (confirmed: a scraper
+        // logged 135 requests in ~10 seconds — physically impossible for a
+        // human — using a UA that didn't match the bot regex above). This
+        // catches that regardless of what UA is sent: no real visitor loads
+        // pages faster than one per second, sustained.
+        $recent = db()->prepare(
+            'SELECT 1 FROM page_views WHERE visitor_hash = ? AND viewed_at >= DATE_SUB(NOW(), INTERVAL 1 SECOND) LIMIT 1'
+        );
+        $recent->execute([$visitorHash]);
+        if ($recent->fetch()) {
+            return;
+        }
+
         db()->prepare(
             'INSERT INTO page_views (path, item_id, visitor_hash, referrer_host) VALUES (?, ?, ?, ?)'
         )->execute([mb_strimwidth($path, 0, 255, ''), $itemId, $visitorHash, $referrerHost]);
