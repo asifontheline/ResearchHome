@@ -41,6 +41,22 @@ function time_budget_exceeded(float $deadline): bool {
 
 // ---- Politeness: robots.txt + per-host rate limiting ---------------------
 
+/**
+ * Read-only, never triggers a live robots.txt fetch — unlike
+ * get_or_fetch_host(). Used where a miss should mean "we don't know yet,
+ * check later" rather than "block here and now": a hub/directory-style
+ * seed page can link to hundreds of never-before-seen hosts in one go, and
+ * synchronously fetching robots.txt (up to 15s x2 for the https/http
+ * fallback) for every single one of them before any can be queued turned
+ * a normal ~4-minute harvest run into 13+ minutes and counting — confirmed
+ * on production (291 brand-new hosts robots-fetched in a single run).
+ */
+function get_cached_host(string $host): ?array {
+    $stmt = db()->prepare('SELECT * FROM hosts WHERE host = ?');
+    $stmt->execute([$host]);
+    return $stmt->fetch() ?: null;
+}
+
 function get_or_fetch_host(string $host): array {
     $stmt = db()->prepare('SELECT * FROM hosts WHERE host = ?');
     $stmt->execute([$host]);
@@ -752,25 +768,30 @@ function crawl_due_seeds(int $limit = 3, ?float $deadline = null): array {
             db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = 0 WHERE id = ?')->execute([$seed['id']]);
 
             $links = extract_links($body, $seed['url']);
-            // Checking robots.txt here, not just later in process_queue_batch(),
-            // matters: confirmed on production that 79% of everything actually
-            // attempted from the queue was robots-disallowed (mostly /search,
-            // /list, /user-style utility paths a hub page links to alongside
-            // real content). Filtering those out before they ever become a
-            // queue row avoids paying for a full row + a future processing
-            // slot on something that was always going to be rejected.
+            // Filters against robots.txt for hosts we already have cached
+            // data for (e.g. arxiv.org, hit repeatedly across many seed
+            // crawls) — that's where the original 79%-wasted-queue-rows
+            // problem actually was. Deliberately does NOT trigger a live
+            // fetch for a host we've never seen (get_cached_host(), not
+            // get_or_fetch_host()) — queues those optimistically instead,
+            // and process_queue_batch()'s own robots check catches them
+            // later, one at a time, when they're actually processed rather
+            // than as a synchronous burst here. See get_cached_host()'s
+            // comment for what happened when this fetched eagerly.
             $hostRowCache = [];
             foreach ($links as $link) {
                 $hash = url_hash($link['url']);
                 $linkHost = parse_url($link['url'], PHP_URL_HOST);
                 if (!$linkHost) continue;
 
-                if (!isset($hostRowCache[$linkHost])) {
-                    $hostRowCache[$linkHost] = get_or_fetch_host($linkHost);
+                if (!array_key_exists($linkHost, $hostRowCache)) {
+                    $hostRowCache[$linkHost] = get_cached_host($linkHost);
                 }
-                $linkPath = parse_url($link['url'], PHP_URL_PATH) ?? '/';
-                if (!robots_path_allowed($hostRowCache[$linkHost], $linkPath)) {
-                    continue;
+                if ($hostRowCache[$linkHost] !== null) {
+                    $linkPath = parse_url($link['url'], PHP_URL_PATH) ?? '/';
+                    if (!robots_path_allowed($hostRowCache[$linkHost], $linkPath)) {
+                        continue;
+                    }
                 }
 
                 try {
