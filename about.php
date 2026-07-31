@@ -28,6 +28,22 @@ require __DIR__ . '/includes/header.php';
   <a href="/activity.php">Activity</a> for live harvest history.
 </p>
 
+<h2>Feedback</h2>
+<p class="muted" style="max-width: 70ch;">
+  Found a bug, or have an idea? Opening a
+  <a href="https://github.com/asifontheline/ResearchHome/issues/new?labels=bug&title=%5BBug%5D%20" target="_blank" rel="noopener noreferrer">bug report</a>
+  or
+  <a href="https://github.com/asifontheline/ResearchHome/issues/new?labels=enhancement&title=%5BFeature%20request%5D%20" target="_blank" rel="noopener noreferrer">feature request</a>
+  on GitHub is the most direct way to reach the person running this — no
+  account needed to read <a href="https://github.com/asifontheline/ResearchHome/issues" target="_blank" rel="noopener noreferrer">existing issues</a>,
+  just to open a new one. No GitHub account?
+  <?php if (defined('CONTACT_EMAIL') && CONTACT_EMAIL !== 'you@example.com'): ?>
+    <a href="mailto:<?= h(CONTACT_EMAIL) ?>">Email instead</a> — it'll get turned into an issue.
+  <?php else: ?>
+    Email works too — see the site's contact address.
+  <?php endif; ?>
+</p>
+
 <h2>Open source</h2>
 <p class="muted" style="max-width: 70ch;">
   ResHub is free and open source under

@@ -3,6 +3,7 @@
   🔭 ResHub (Research Hub) stores no content — only metadata and a link to the original source for every item.
   A personal, non-commercial research catalog. <a href="/credits.php">Sources &amp; credits</a>.
   <a href="/notrack.php">Opt out of tracking</a>.
+  <a href="https://github.com/asifontheline/ResearchHome/issues/new/choose" target="_blank" rel="noopener noreferrer">Report a bug / suggest something</a>.
 </footer>
 <script>
 // Google's own dropdown/menu UI doesn't reflow responsively and can render
