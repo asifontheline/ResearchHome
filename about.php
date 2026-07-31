@@ -37,8 +37,12 @@ require __DIR__ . '/includes/header.php';
   on GitHub is the most direct way to reach the person running this — no
   account needed to read <a href="https://github.com/asifontheline/ResearchHome/issues" target="_blank" rel="noopener noreferrer">existing issues</a>,
   just to open a new one. No GitHub account?
-  <?php if (defined('CONTACT_EMAIL') && CONTACT_EMAIL !== 'you@example.com'): ?>
-    <a href="mailto:<?= h(CONTACT_EMAIL) ?>">Email instead</a> — it'll get turned into an issue.
+  <?php
+    $feedbackEmail = (defined('FEEDBACK_EMAIL') && FEEDBACK_EMAIL) ? FEEDBACK_EMAIL
+        : ((defined('CONTACT_EMAIL') && CONTACT_EMAIL !== 'you@example.com') ? CONTACT_EMAIL : null);
+  ?>
+  <?php if ($feedbackEmail): ?>
+    <a href="mailto:<?= h($feedbackEmail) ?>">Email instead</a> — it'll get turned into an issue.
   <?php else: ?>
     Email works too — see the site's contact address.
   <?php endif; ?>

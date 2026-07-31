@@ -23,6 +23,12 @@ define('APP_SECRET', 'change-this-to-a-long-random-string');
 // several sources treat identified callers noticeably better than anonymous ones.
 define('CONTACT_EMAIL', 'you@example.com');
 
+// Shown on About as the no-GitHub-account fallback for bug reports/feature
+// requests — separate from CONTACT_EMAIL above (that one's for API
+// politeness/identification, a different audience). Falls back to
+// CONTACT_EMAIL if left blank.
+define('FEEDBACK_EMAIL', '');
+
 // Optional: NCBI E-utilities API key increases PubMed rate limits (not required).
 define('NCBI_API_KEY', '');
 
