@@ -81,9 +81,26 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
 }
 
-/* Google's Website Translator widget renders into this — a cross-origin
-   iframe internally, so only outer sizing/alignment is ours to control. */
-.translate-toggle { display: flex; align-items: center; font-size: 0.85rem; }
+/* Google's own dropdown/menu UI doesn't reflow responsively and was
+   overflowing past the viewport edge — so its rendered UI is never shown
+   (#google_translate_element stays display:none in header.php); this is
+   our own <select> instead, driven programmatically. */
+.translate-toggle select {
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.85rem;
+  max-width: 160px;
+}
+
+/* Defensive: Google's script can still inject a top notification banner
+   (a fixed-position iframe) once translation is active, separate from the
+   dropdown UI above — hidden so it can't push page content down or
+   introduce its own overflow/width issues. */
+.goog-te-banner-frame { display: none !important; }
+body { top: 0 !important; }
 
 /* Summary box + nav share the far-right end of the header, so the box lives
    in the page's top-right corner without ever overlapping page content. */
