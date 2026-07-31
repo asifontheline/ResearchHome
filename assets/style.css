@@ -83,18 +83,28 @@ a:hover { text-decoration: underline; }
 
 /* Google's own widget, shown directly (two attempts at hiding it and
    driving a custom control instead both proved unreliable — see
-   footer.php). Constrain what's ours to control; the popup menu itself
-   (.goog-te-menu-frame below) is a separate fixed-position iframe Google
-   appends to <body>, outside this container entirely. */
-.translate-toggle { max-width: 140px; overflow: hidden; }
+   footer.php). No max-width/overflow here — that was clipping the
+   trigger button itself (its natural rendered width is wider than the
+   140px this used to cap it at), which looked broken at all times, not
+   just when the popup opened. The actual overflow problem was always the
+   popup menu below, a separate element entirely — this container just
+   needs to not force-wrap awkwardly in the header. */
+.translate-toggle { flex-shrink: 0; }
 
-/* The language-picker popup is a cross-origin iframe positioned by
-   Google's own inline JS — its internal content can't be restyled, but
-   forcing the outer frame to fit the viewport at least stops it from
-   extending past the screen edge on narrow/mobile widths (the original
-   overflow complaint), even if that means the iframe's own content needs
-   its own internal scrollbar. */
-.goog-te-menu-frame { max-width: 96vw !important; }
+/* The language-picker popup (.goog-te-menu-frame) is a cross-origin
+   iframe Google appends to <body> and positions itself via inline JS —
+   this is the actual "spanning beyond full screen" element from the
+   original report, not the trigger button above. Its internal content
+   can't be restyled (cross-origin), but constraining the outer frame's
+   box and forcing it to stay within the viewport horizontally stops it
+   from extending past the screen edge, even if that means its own
+   content needs an internal scrollbar on narrow widths. !important is
+   necessary here — Google's script sets this iframe's size/position via
+   inline style attributes, which otherwise win over any stylesheet rule. */
+.goog-te-menu-frame {
+  max-width: 96vw !important;
+  left: 2vw !important;
+}
 
 /* Defensive: Google's script can also inject a top notification banner
    (a separate fixed-position iframe) once translation is active — hidden
