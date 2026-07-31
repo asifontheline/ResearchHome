@@ -254,7 +254,7 @@ function render_world_map(array $points, string $domId): string {
         </div>
         <div class="world-map-viewport" id="%1$s-viewport">
             <div class="world-map-wrap" id="%1$s-wrap">
-                <img src="/assets/world-map.svg" class="world-map-bg" alt="World map" width="784" height="459" loading="lazy" draggable="false">
+                <img src="/assets/world-map.svg?v=%4$d" class="world-map-bg" alt="World map" width="784" height="459" loading="lazy" draggable="false">
                 <svg class="world-map-dots" viewBox="30.767 241.591 784.077 458.627" preserveAspectRatio="xMidYMid meet" aria-hidden="true">%2$s</svg>
             </div>
         </div>
@@ -314,7 +314,7 @@ function render_world_map(array $points, string $domId): string {
             center();
         })();
         </script>',
-        h($domId), $dots, json_encode($domId)
+        h($domId), $dots, json_encode($domId), filemtime(__DIR__ . '/../assets/world-map.svg')
     );
 }
 
