@@ -84,36 +84,20 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
 }
 
-/* Google's own widget, shown directly (two attempts at hiding it and
-   driving a custom control instead both proved unreliable — see
-   footer.php). No max-width/overflow here — that was clipping the
-   trigger button itself (its natural rendered width is wider than the
-   140px this used to cap it at), which looked broken at all times, not
-   just when the popup opened. The actual overflow problem was always the
-   popup menu below, a separate element entirely — this container just
-   needs to not force-wrap awkwardly in the header. */
+/* Google's own widget, shown directly. */
 .translate-toggle { flex-shrink: 0; }
 
-/* The language-picker popup (.goog-te-menu-frame) is a cross-origin
-   iframe Google appends to <body> and positions itself via inline JS —
-   this is the actual "spanning beyond full screen" element from the
-   original report, not the trigger button above. Its internal content
-   can't be restyled (cross-origin), but constraining the outer frame's
-   box and forcing it to stay within the viewport horizontally stops it
-   from extending past the screen edge, even if that means its own
-   content needs an internal scrollbar on narrow widths. !important is
-   necessary here — Google's script sets this iframe's size/position via
-   inline style attributes, which otherwise win over any stylesheet rule. */
-.goog-te-menu-frame {
-  max-width: 96vw !important;
-  left: 2vw !important;
-}
-
-/* Defensive: Google's script can also inject a top notification banner
-   (a separate fixed-position iframe) once translation is active — hidden
-   so it can't push page content down or introduce its own width issues. */
-.goog-te-banner-frame { display: none !important; }
-body { top: 0 !important; }
+/* The language-picker popup — verified via an actual headless-browser
+   test against the live site (not guessed): Google's real class here is
+   .skiptranslate, an inline-styled iframe set to an enormous fixed width
+   (2600px+, regardless of viewport) that's what actually caused the
+   "spans beyond full screen" report. Three earlier attempts guessed
+   .goog-te-combo / .goog-te-menu-frame / .goog-te-banner-frame — none of
+   those classes exist in this widget version at all, which is why they
+   had zero effect no matter how the rest of the approach changed.
+   Confirmed by screenshot (1280px and 390px viewports) that max-width
+   alone contains it correctly without needing to also force `left`. */
+iframe.skiptranslate { max-width: 96vw !important; }
 
 /* Summary box + nav share the far-right end of the header, so the box lives
    in the page's top-right corner without ever overlapping page content. */
