@@ -8,11 +8,15 @@
 // Google's own dropdown/menu UI doesn't reflow responsively and can render
 // wider than the viewport (confirmed — it was overflowing on real pages).
 // So the widget itself stays hidden (#google_translate_element,
-// display:none in header.php) — it still does the actual translation work,
-// we just never show its UI. Our own <select> in the header drives it
-// instead, by finding the <select class="goog-te-combo"> Google's script
-// injects and dispatching a change event on it, same mechanism its own
-// dropdown would trigger.
+// display:none in header.php) — it still does the actual translation work
+// (that part is cookie-driven, not UI-driven — this is the same mechanism
+// the server-side Accept-Language auto-detect in header.php already relies
+// on), we just never show its own UI. Trying to drive it by finding and
+// manipulating Google's internal <select class="goog-te-combo"> was tried
+// first and didn't reliably work — that element's availability/structure
+// isn't something to depend on. Setting the googtrans cookie and reloading
+// is the same thing Google's own dropdown does under the hood, and is what
+// the auto-detect feature already proves works.
 function googleTranslateElementInit() {
     new google.translate.TranslateElement({
         pageLanguage: 'en',
@@ -24,22 +28,16 @@ function googleTranslateElementInit() {
 (function () {
     var ourSelect = document.getElementById('reshub-lang-select');
     if (!ourSelect) return;
+
     ourSelect.addEventListener('change', function () {
+        // /en/en (source=target) rather than deleting the cookie — deleting
+        // it would make header.php's Accept-Language auto-detect think no
+        // choice was ever made and silently re-translate on the very next
+        // page load, undoing "Original" the moment you navigate anywhere.
         var lang = ourSelect.value;
-        // The combo box only exists once Google's script has finished
-        // initializing — poll briefly rather than assuming it's ready.
-        var tries = 0;
-        var interval = setInterval(function () {
-            var combo = document.querySelector('#google_translate_element select.goog-te-combo');
-            tries++;
-            if (combo) {
-                clearInterval(interval);
-                combo.value = lang;
-                combo.dispatchEvent(new Event('change'));
-            } else if (tries > 40) {
-                clearInterval(interval); // ~10s, give up quietly
-            }
-        }, 250);
+        var expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toUTCString();
+        document.cookie = 'googtrans=/en/' + lang + '; expires=' + expires + '; path=/';
+        window.location.reload();
     });
 })();
 </script>
