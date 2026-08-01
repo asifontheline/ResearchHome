@@ -15,6 +15,47 @@ Plain PHP + MySQL, no framework, no build step — built to run on ordinary
 cPanel shared hosting (tested against a MilesWeb Premium plan). See
 `DESIGN.md` for the full architecture writeup.
 
+## Features
+
+- **Multi-source harvesting** — 6 free structured APIs (arXiv, Crossref,
+  PubMed, OpenAlex, Semantic Scholar, USPTO/PatentsView), cooldown-gated per
+  source so frequent cron invocations no-op cheaply instead of re-hitting APIs
+- **Bounded, polite crawler** — seeded from curated hub/listing pages,
+  respects `robots.txt` (checked at both discovery and fetch time) and
+  per-host crawl-delay, never an open-ended crawl of arbitrary sites
+- **Source discovery** — proposes new crawler seeds by mining OpenAlex's own
+  repository index and flagging listing-like pages the crawler encounters on
+  domains it's never touched before; every proposal waits for admin review
+- **Search that queues its own gaps** — a zero-result search gets queued for
+  the harvester to try directly next run, plus immediate fallback links to
+  Google Scholar, Semantic Scholar, OpenAlex, arXiv, PubMed, CORE, and BASE
+- **Sort by recency or citation count** — citation counts captured from the
+  sources that report one (OpenAlex, Semantic Scholar, Crossref)
+- **Human-readable tags** — arXiv's raw category codes (`cs.LG`, `math.CO`,
+  ...) expanded to plain-English labels across its full ~155-code taxonomy
+- **Reader-facing "Report broken link"** — no login, no GitHub issue; the
+  script re-verifies the URL itself before removing anything
+- **Random-sample link health checks** — dead links (404/410, or repeated
+  failures) get pruned automatically; sampling instead of a FIFO queue so
+  there's no backlog that outgrows the catalog
+- **Privacy-respecting analytics** — page views and an approximate
+  city/region/country per visitor, no raw IP ever stored (daily-rotating
+  salted hash); visitors can opt out entirely, not just the site owner
+- **World map of visitor locations** — pannable/zoomable, rendered
+  server-side as inline SVG, no external map/JS library
+- **In-page translation** — auto-suggested from the browser's own language
+  header, drives Google's translation engine without ever showing its
+  non-responsive dropdown UI
+- **Feedback loop** — pre-filled "bug report" / "feature request" GitHub
+  issue links, plus an email fallback for readers without a GitHub account
+- **Admin console** — harvest run history, seed management (incl. reviewing
+  discovered-seed proposals), traffic dashboard, zero-result search queue,
+  one-click "run harvest/discovery now"
+- **Per-IP request rate limiting** — protects the server itself from a
+  scraping burst, independent of the analytics-side bot filtering
+- **Credits that don't rot** — every publisher/repository links to its own
+  site root (not a specific deep item page that can move or disappear)
+
 ## Local scheduling (until deployed)
 
 Before this is deployed to MilesWeb (where mPanel Cron Jobs takes over —
