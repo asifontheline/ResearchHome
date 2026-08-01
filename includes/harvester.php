@@ -795,12 +795,29 @@ function crawl_due_seeds(int $limit = 3, ?float $deadline = null): array {
                 }
 
                 try {
-                    db()->prepare(
+                    // INSERT IGNORE never throws on a duplicate key — that's
+                    // the whole point of IGNORE — so the catch below was
+                    // never actually reached by "already queued" links; it
+                    // was silently counting every re-scan of the same seed
+                    // page as a fresh "discovery" even when every single
+                    // link was already in the queue from an hour ago.
+                    // rowCount() is the only way to tell whether this
+                    // execute() actually inserted a new row (1) or was a
+                    // silent no-op on an existing url_hash (0). Confirmed
+                    // on production: harvest_log reported ~3,300
+                    // "discovered" per run while only 4–17 rows/hour were
+                    // genuinely new — seeds get fully re-scanned every run,
+                    // and almost everything found is a link already queued
+                    // from a previous hour.
+                    $stmt = db()->prepare(
                         'INSERT IGNORE INTO crawl_queue (url, url_hash, host, subject_slug) VALUES (?, ?, ?, ?)'
-                    )->execute([$link['url'], $hash, $linkHost, $seed['subject_slug']]);
-                    $discovered++;
+                    );
+                    $stmt->execute([$link['url'], $hash, $linkHost, $seed['subject_slug']]);
+                    if ($stmt->rowCount() > 0) {
+                        $discovered++;
+                    }
                 } catch (Throwable $e) {
-                    // duplicate or malformed, skip
+                    // malformed url_hash collision or similar, skip
                 }
             }
         } catch (Throwable $e) {
