@@ -9,7 +9,7 @@ $perPage = 24;
 
 $joinClause = '';
 $params = [];
-$where = [];
+$where = ["i.content_type = 'research'"]; // videos live in their own section, videos.php
 
 if ($tagSlug !== '') {
     $joinClause = ' JOIN item_tags it ON it.item_id = i.id JOIN tags t ON t.id = it.tag_id';

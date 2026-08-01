@@ -507,7 +507,7 @@ function all_contributing_sources(): array {
         "SELECT i.source_name, COUNT(*) AS item_count,
                 SUBSTRING_INDEX(GROUP_CONCAT(i.url ORDER BY i.added_at DESC), ',', 1) AS sample_url
          FROM items i
-         WHERE i.source_name IS NOT NULL
+         WHERE i.source_name IS NOT NULL AND i.content_type = 'research'
          GROUP BY i.source_name
          ORDER BY item_count DESC, i.source_name ASC"
     )->fetchAll();
@@ -523,19 +523,20 @@ function all_contributing_sources(): array {
 
 function all_tags_with_counts(): array {
     return db()->query(
-        'SELECT t.id, t.name, t.slug, COUNT(it.item_id) AS item_count
+        "SELECT t.id, t.name, t.slug, COUNT(i.id) AS item_count
          FROM tags t
          LEFT JOIN item_tags it ON it.tag_id = t.id
+         LEFT JOIN items i ON i.id = it.item_id AND i.content_type = 'research'
          GROUP BY t.id
-         ORDER BY t.name'
+         ORDER BY t.name"
     )->fetchAll();
 }
 
 function get_catalog_summary(): array {
     return [
-        'total_items' => (int) db()->query('SELECT COUNT(*) FROM items')->fetchColumn(),
+        'total_items' => (int) db()->query("SELECT COUNT(*) FROM items WHERE content_type = 'research'")->fetchColumn(),
         'total_tags' => (int) db()->query('SELECT COUNT(*) FROM tags')->fetchColumn(),
-        'total_sources' => (int) db()->query("SELECT COUNT(DISTINCT source_name) FROM items WHERE source_name IS NOT NULL")->fetchColumn(),
+        'total_sources' => (int) db()->query("SELECT COUNT(DISTINCT source_name) FROM items WHERE source_name IS NOT NULL AND content_type = 'research'")->fetchColumn(),
         'last_run' => db()->query('SELECT * FROM harvest_log ORDER BY started_at DESC LIMIT 1')->fetch() ?: null,
     ];
 }
@@ -588,8 +589,8 @@ function insert_item_if_new(array $fields, array $tagNames = []): ?int {
     }
 
     $stmt = $pdo->prepare(
-        'INSERT INTO items (title, url, url_hash, authors, abstract, notes, source_name, published_date, image_url, citation_count)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO items (title, url, url_hash, authors, abstract, notes, source_name, published_date, image_url, citation_count, content_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $stmt->execute([
         mb_strimwidth($fields['title'] ?? 'Untitled', 0, 512, ''),
@@ -602,6 +603,7 @@ function insert_item_if_new(array $fields, array $tagNames = []): ?int {
         $fields['published_date'] ?? null,
         $fields['image_url'] ?? null,
         $fields['citation_count'] ?? null,
+        $fields['content_type'] ?? 'research',
     ]);
     $itemId = (int) $pdo->lastInsertId();
     if ($itemId <= 0) {
@@ -728,6 +730,7 @@ function get_harvest_activity_by_source(int $days = 30): array {
         "SELECT DATE(added_at) AS day, COALESCE(source_name, 'Unknown') AS source, COUNT(*) AS cnt
          FROM items
          WHERE added_at >= DATE_SUB(CURDATE(), INTERVAL " . (int)$days . " DAY)
+           AND content_type = 'research'
          GROUP BY day, source"
     )->fetchAll();
 

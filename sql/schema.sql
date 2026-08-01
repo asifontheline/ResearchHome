@@ -24,10 +24,12 @@ CREATE TABLE IF NOT EXISTS items (
     last_checked_at DATETIME DEFAULT NULL,      -- last time the outbound link was verified reachable
     failed_checks TINYINT UNSIGNED NOT NULL DEFAULT 0, -- consecutive failures; item is removed past a threshold
     citation_count INT UNSIGNED DEFAULT NULL,   -- from source metadata where available (OpenAlex, Semantic Scholar, Crossref); NULL where the source doesn't report one (arXiv, PubMed, patents)
+    content_type ENUM('research','video') NOT NULL DEFAULT 'research', -- 'video' items (YouTube/Vimeo) live in their own section (videos.php), excluded from the main research catalog/search/credits/activity chart
     UNIQUE KEY uniq_url_hash (url_hash),
     KEY idx_added_at (added_at),
     KEY idx_last_checked_at (last_checked_at),
     KEY idx_citation_count (citation_count),
+    KEY idx_content_type (content_type),
     FULLTEXT KEY ft_search (title, authors, abstract, notes)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

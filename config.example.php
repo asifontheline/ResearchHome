@@ -45,3 +45,14 @@ define('SEMANTIC_SCHOLAR_API_KEY', '');
 // emails a status digest here every run — catalog totals, recent harvest/
 // discovery runs, and any stuck or errored runs. Leave blank to disable.
 define('MONITOR_EMAIL', '');
+
+// Optional: enables video harvesting (videos.php, a separate section from
+// the research catalog — see includes/harvester.php's api_harvest_youtube).
+// Free key from Google Cloud Console (enable "YouTube Data API v3").
+// Quota: 10,000 units/day, a search costs 100 — fine for one search/run.
+define('YOUTUBE_API_KEY', '');
+
+// Optional: enables Vimeo video harvesting. Free personal access token from
+// https://developer.vimeo.com/apps (create an app, generate an
+// unauthenticated/personal token with "Public" scope).
+define('VIMEO_ACCESS_TOKEN', '');

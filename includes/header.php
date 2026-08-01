@@ -89,6 +89,7 @@ if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE
     </table>
     <nav>
       <a href="/index.php">Home</a>
+      <a href="/videos.php">Videos</a>
       <a href="/activity.php">Activity</a>
       <a href="/tags.php">Tags</a>
       <a href="/credits.php">Credits</a>

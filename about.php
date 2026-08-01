@@ -27,6 +27,11 @@ require __DIR__ . '/includes/header.php';
   source. See <a href="/credits.php">Credits</a> for the full source list and
   <a href="/activity.php">Activity</a> for live harvest history.
 </p>
+<p class="muted" style="max-width: 70ch;">
+  <a href="/videos.php">Videos</a> is a separate section — talks, lectures,
+  and explainers harvested from YouTube and Vimeo the same automated way,
+  kept apart from the paper/patent catalog rather than mixed into it.
+</p>
 
 <h2>Feedback</h2>
 <p class="muted" style="max-width: 70ch;">

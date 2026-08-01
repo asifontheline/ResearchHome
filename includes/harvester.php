@@ -472,6 +472,94 @@ function api_harvest_patentsview(string $subjectSlug, string $keyword, int $max 
     return ['added' => $added];
 }
 
+// ---- Video harvest: YouTube + Vimeo ---------------------------------------
+// A separate content_type ('video'), kept out of the main research catalog
+// entirely (index.php, credits, activity chart, tags counts all filter to
+// content_type='research') — surfaced only on videos.php. Both silently
+// no-op when their key isn't configured, same pattern as PATENTSVIEW_API_KEY.
+
+function api_harvest_youtube(string $subjectSlug, string $keyword, int $max = 8): array {
+    if (!defined('YOUTUBE_API_KEY') || !YOUTUBE_API_KEY) {
+        return ['added' => 0]; // not configured — silently skip, not an error
+    }
+
+    $q = urlencode($keyword);
+    $key = urlencode(YOUTUBE_API_KEY);
+    $body = safe_http_get("https://www.googleapis.com/youtube/v3/search?part=snippet&q={$q}&type=video&order=relevance&maxResults={$max}&key={$key}");
+    if (!$body) return ['added' => 0, 'error' => 'YouTube request failed'];
+
+    $data = json_decode($body, true);
+    if (isset($data['error'])) return ['added' => 0, 'error' => 'YouTube: ' . ($data['error']['message'] ?? 'unknown error')];
+
+    $items = $data['items'] ?? [];
+    $added = 0;
+    foreach ($items as $item) {
+        $videoId = $item['id']['videoId'] ?? null;
+        $snippet = $item['snippet'] ?? [];
+        $title = $snippet['title'] ?? null;
+        if (!$videoId || !$title) continue;
+
+        $thumb = $snippet['thumbnails']['high']['url']
+            ?? $snippet['thumbnails']['medium']['url']
+            ?? $snippet['thumbnails']['default']['url'] ?? null;
+        $tags = array_unique(array_merge(classify_subjects($title . ' ' . ($snippet['description'] ?? '')), array_filter([$subjectSlug])));
+
+        $id = insert_item_if_new([
+            'title' => $title,
+            'url' => "https://www.youtube.com/watch?v={$videoId}",
+            'abstract' => $snippet['description'] ?? null,
+            'source_name' => $snippet['channelTitle'] ?? 'YouTube',
+            'published_date' => isset($snippet['publishedAt']) ? substr($snippet['publishedAt'], 0, 10) : null,
+            'image_url' => $thumb,
+            'content_type' => 'video',
+        ], $tags);
+        if ($id) $added++;
+    }
+    return ['added' => $added];
+}
+
+function api_harvest_vimeo(string $subjectSlug, string $keyword, int $max = 8): array {
+    if (!defined('VIMEO_ACCESS_TOKEN') || !VIMEO_ACCESS_TOKEN) {
+        return ['added' => 0]; // not configured — silently skip, not an error
+    }
+
+    $q = urlencode($keyword);
+    $headers = [
+        'Authorization: Bearer ' . VIMEO_ACCESS_TOKEN,
+        'Accept: application/vnd.vimeo.*+json;version=3.4',
+    ];
+    $body = safe_http_get("https://api.vimeo.com/videos?query={$q}&per_page={$max}&sort=relevant", $headers);
+    if (!$body) return ['added' => 0, 'error' => 'Vimeo request failed'];
+
+    $data = json_decode($body, true);
+    if (isset($data['error'])) return ['added' => 0, 'error' => 'Vimeo: ' . $data['error']];
+
+    $videos = $data['data'] ?? [];
+    $added = 0;
+    foreach ($videos as $v) {
+        $title = $v['name'] ?? null;
+        $url = $v['link'] ?? null;
+        if (!$title || !$url) continue;
+
+        $sizes = $v['pictures']['sizes'] ?? [];
+        $thumb = $sizes ? end($sizes)['link'] ?? null : null;
+        $published = $v['release_time'] ?? $v['created_time'] ?? null;
+        $tags = array_unique(array_merge(classify_subjects($title . ' ' . ($v['description'] ?? '')), array_filter([$subjectSlug])));
+
+        $id = insert_item_if_new([
+            'title' => $title,
+            'url' => $url,
+            'abstract' => $v['description'] ?? null,
+            'source_name' => $v['user']['name'] ?? 'Vimeo',
+            'published_date' => $published ? substr($published, 0, 10) : null,
+            'image_url' => $thumb,
+            'content_type' => 'video',
+        ], $tags);
+        if ($id) $added++;
+    }
+    return ['added' => $added];
+}
+
 /**
  * Shared hosting often caps PHP execution time around 30s regardless of
  * set_time_limit(), and one subject x one API call already involves a
@@ -543,6 +631,42 @@ function run_api_harvest(array $subjects, int $perSourceMax = 5, int $subjectsPe
         $errors[] = 'Stopped early: time budget exceeded — remaining sources resume next run.';
     }
     return ['added' => $added, 'errors' => $errors, 'subjects' => $batch, 'skipped' => array_unique($skipped)];
+}
+
+/**
+ * Same subject-rotation shape as run_api_harvest(), kept fully independent
+ * of it — own cursor setting key (doesn't skip/advance the research-catalog
+ * rotation), own source-cooldown keys. No-ops cheaply if neither
+ * YOUTUBE_API_KEY nor VIMEO_ACCESS_TOKEN is configured (each harvest
+ * function checks its own key and returns early).
+ */
+function run_video_harvest(array $subjects, int $perSourceMax = 5, ?float $deadline = null): array {
+    $slugs = array_keys($subjects);
+    $cursor = (int) get_setting('video_subject_cursor', '0') % count($slugs);
+    $slug = $slugs[$cursor];
+    set_setting('video_subject_cursor', (string) (($cursor + 1) % count($slugs)));
+    $keyword = $subjects[$slug]['keywords'][0];
+
+    $sources = ['api_harvest_youtube', 'api_harvest_vimeo'];
+    $added = 0;
+    $errors = [];
+    foreach ($sources as $fn) {
+        if ($deadline !== null && time_budget_exceeded($deadline)) {
+            $errors[] = 'Stopped early: time budget exceeded — remaining video sources resume next run.';
+            break;
+        }
+        if (!source_ready($fn)) continue;
+        mark_source_called($fn);
+        try {
+            $result = $fn($slug, $keyword, $perSourceMax);
+            $added += $result['added'];
+            if (!empty($result['error'])) $errors[] = "{$fn}({$slug}): {$result['error']}";
+        } catch (Throwable $e) {
+            db(true);
+            $errors[] = "{$fn}({$slug}): " . $e->getMessage();
+        }
+    }
+    return ['added' => $added, 'errors' => $errors];
 }
 
 /**
@@ -1085,6 +1209,14 @@ function run_content_harvest(): array {
         $searchMisses = harvest_search_misses(3, 5, $deadline);
         $itemsAdded += $searchMisses['added'];
         $errors = array_merge($errors, $searchMisses['errors']);
+
+        // Video items (content_type='video') never count toward the
+        // research-catalog $itemsAdded total shown in the harvest log — kept
+        // as a separate figure so "items added" there keeps meaning
+        // "research catalog grew by N", not conflated with video counts.
+        $video = run_video_harvest($subjects, 5, $deadline);
+        $videoItemsAdded = $video['added'];
+        $errors = array_merge($errors, $video['errors']);
 
         // Was 3 — at that rate, with 119 active seeds and harvest capped to
         // one run/hour, a seed could go 40+ hours between attempts, and the
