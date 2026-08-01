@@ -543,6 +543,17 @@ function get_catalog_summary(): array {
     ];
 }
 
+/**
+ * Video harvesting (YouTube/Vimeo) is opt-in via config keys that may not
+ * be set — until at least one video has actually been harvested, "By
+ * Video" links to an empty page. Checked instead of just "is a key
+ * configured" so the link only appears once there's real content, not the
+ * moment a key is added but before the next harvest run has found anything.
+ */
+function has_video_content(): bool {
+    return (bool) db()->query("SELECT 1 FROM items WHERE content_type = 'video' LIMIT 1")->fetchColumn();
+}
+
 // ---- Small key-value settings store (harvester state) -------------------
 
 function get_setting(string $name, ?string $default = null): ?string {
