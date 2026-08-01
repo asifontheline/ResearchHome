@@ -17,6 +17,7 @@ cPanel shared hosting (tested against a MilesWeb Premium plan). See
 
 ## Features
 
+### Cataloging
 - **Multi-source harvesting** — 6 free structured APIs (arXiv, Crossref,
   PubMed, OpenAlex, Semantic Scholar, USPTO/PatentsView), cooldown-gated per
   source so frequent cron invocations no-op cheaply instead of re-hitting APIs
@@ -26,6 +27,22 @@ cPanel shared hosting (tested against a MilesWeb Premium plan). See
 - **Source discovery** — proposes new crawler seeds by mining OpenAlex's own
   repository index and flagging listing-like pages the crawler encounters on
   domains it's never touched before; every proposal waits for admin review
+- **Manual add/edit** — a fallback path, not the normal workflow; one-click
+  metadata auto-fetch from a pasted URL (arXiv/PubMed/Crossref-aware, generic
+  OpenGraph/meta-tag extraction otherwise), with an option to add the URL as
+  a new crawler seed at the same time
+- **Dedup by URL hash** on every insertion path (API harvest, crawler,
+  manual add) — the same item never gets cataloged twice
+- **Junk-title filtering** — rejects placeholder pages at insert time
+  (Crossref's "Title Pending" pre-registered DOIs, 404/access-denied pages,
+  bot-challenge pages), centralized so every source is covered, not just one
+
+### Browsing & search
+- **Subject browsing** — curated, hand-grouped taxonomy (see
+  `includes/subjects.php`), distinct from raw source tags
+- **Tag browsing** — full directory of every tag, most-used first
+- **Full-text search** (MySQL `MATCH...AGAINST`) across title/authors/
+  abstract/notes
 - **Search that queues its own gaps** — a zero-result search gets queued for
   the harvester to try directly next run, plus immediate fallback links to
   Google Scholar, Semantic Scholar, OpenAlex, arXiv, PubMed, CORE, and BASE
@@ -33,28 +50,64 @@ cPanel shared hosting (tested against a MilesWeb Premium plan). See
   sources that report one (OpenAlex, Semantic Scholar, Crossref)
 - **Human-readable tags** — arXiv's raw category codes (`cs.LG`, `math.CO`,
   ...) expanded to plain-English labels across its full ~155-code taxonomy
+- **In-page translation** — auto-suggested from the browser's own language
+  header, drives Google's translation engine without ever showing its
+  non-responsive dropdown UI
+- **Activity page** — per-day, per-source "items added" chart (custom inline
+  SVG, no charting library) plus recent harvest run history, public
+
+### Keeping the catalog honest
 - **Reader-facing "Report broken link"** — no login, no GitHub issue; the
   script re-verifies the URL itself before removing anything
 - **Random-sample link health checks** — dead links (404/410, or repeated
-  failures) get pruned automatically; sampling instead of a FIFO queue so
-  there's no backlog that outgrows the catalog
+  failures) get pruned automatically every harvest run; sampling instead of
+  a FIFO queue so there's no backlog that outgrows the catalog
+- **Credits that don't rot** — every publisher/repository on Credits links to
+  its own site root (not a specific deep item page that can move or
+  disappear), derived from real harvested URLs rather than guessed
+
+### Reliability & ops
+- **Self-healing run locks** — a crashed/killed run can't deadlock the next
+  cron tick forever; the lock expires on its own before the next scheduled
+  invocation would need it
+- **Soft time-budget pattern** — checked between items, not mid-item; a run
+  approaching its deadline finishes the item in progress and stops cleanly,
+  picking up where it left off next run instead of losing work
+- **MySQL reconnect-on-failure** — a dropped connection during a slow
+  external API wait doesn't crash the whole run
+- **Harvest capped to one run per clock hour** regardless of cron
+  misconfiguration or duplicate cron entries
+- **Email monitoring digest** — self-expiring hourly status report (stuck
+  runs, cron-not-firing detection, last N runs), rides along on the existing
+  cron rather than needing its own
+- **Admin "run now"** buttons for on-demand harvest/discovery outside the
+  regular cron cadence
+- **CI/CD via GitHub Actions** — push to `main` auto-deploys over FTP
+
+### Privacy, trust & legal
 - **Privacy-respecting analytics** — page views and an approximate
   city/region/country per visitor, no raw IP ever stored (daily-rotating
   salted hash); visitors can opt out entirely, not just the site owner
 - **World map of visitor locations** — pannable/zoomable, rendered
   server-side as inline SVG, no external map/JS library
-- **In-page translation** — auto-suggested from the browser's own language
-  header, drives Google's translation engine without ever showing its
-  non-responsive dropdown UI
-- **Feedback loop** — pre-filled "bug report" / "feature request" GitHub
-  issue links, plus an email fallback for readers without a GitHub account
-- **Admin console** — harvest run history, seed management (incl. reviewing
-  discovered-seed proposals), traffic dashboard, zero-result search queue,
-  one-click "run harvest/discovery now"
 - **Per-IP request rate limiting** — protects the server itself from a
   scraping burst, independent of the analytics-side bot filtering
-- **Credits that don't rot** — every publisher/repository links to its own
-  site root (not a specific deep item page that can move or disappear)
+- **Hardened session cookies** (`Secure`/`HttpOnly`/`SameSite=Strict`),
+  sensitive files blocked via `.htaccess`, own `robots.txt` excluding
+  login-gated admin routes from search engines
+- **AGPL-3.0, genuinely open source** — copy it, self-host it, modify it;
+  see `CONTRIBUTING.md` / `DESIGN.md`
+- **"Nothing is copied"** — every item is metadata + a link back to the
+  original source, never a mirror of the content itself
+
+### Admin console
+- Harvest run history, seed management (add/approve/toggle/delete, incl.
+  reviewing discovered-seed proposals), traffic dashboard, zero-result
+  search-miss queue, one-click "run harvest/discovery now"
+
+### Feedback
+- Pre-filled "bug report" / "feature request" GitHub issue links, plus an
+  email fallback for readers without a GitHub account
 
 ## Local scheduling (until deployed)
 
