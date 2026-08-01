@@ -12,7 +12,7 @@ require __DIR__ . '/includes/header.php';
   ResHub (Research Hub) is a self-updating catalog of freely available research —
   papers, patents, and articles — discovered automatically and tagged by subject
   and source, with no manual entry required. It's a dynamic site: new items are
-  added on an hourly harvest, with a discovery phase every half hour looking for new sources.
+  added every 15 minutes, with a discovery phase every half hour looking for new sources.
 </p>
 
 <h2>How it works</h2>

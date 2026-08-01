@@ -34,10 +34,14 @@ Harvester:        harvest.php (new)                   (cron + admin-triggered)
 Shared code:      includes/{db,auth,functions,subjects,harvester}.php
 ```
 
-Data flow after this epic: `harvest.php` (cron, hourly) → `includes/harvester.php`
+Data flow after this epic: `harvest.php` (cron, every 15 min) → `includes/harvester.php`
 → writes rows into `items`/`tags`/`item_tags` → `index.php`/`item.php` read
 them like any other row. The browse/search UI does not change; it was
 already harvester-agnostic by design (reads from `items`, filters by `tags`).
+(Was hourly — moved to a 15-minute cadence once the seed list grew large
+enough that a single run crawling all of it took several minutes; seeds are
+now split into 4 rotating groups instead, one group per 15-minute slot, so
+each run stays fast. See §4.3.)
 
 ## 4. Harvester design
 
@@ -149,15 +153,38 @@ faster, not from trusting arbitrary new domains automatically.
 
 ### 4.3 Scheduling
 
-`harvest.php` is invoked by a cPanel Cron Job (e.g. hourly):
+`harvest.php` is invoked by a cPanel Cron Job, every 15 minutes:
 ```
 php /home/USER/public_html/researchhome/harvest.php
 ```
+(Was hourly originally — moved to 15 minutes once the seed list grew large
+enough that crawling all of it in one run took several minutes on its own.
+`harvest_already_ran_this_slot()` caps actual execution to once per
+15-minute window regardless of how many times cron fires, same self-healing
+pattern as the old hourly cap — `HARVEST_MAX_RUNTIME_MINUTES` (14) keeps
+the run-lock's timeout under the cron interval, so a crashed run's lock
+clears before the next slot instead of blocking it.)
+
 It also has an admin-triggered web path (`POST` from a "Run harvest now"
 button, login-gated) for on-demand runs during setup/testing, sharing the
 same underlying functions. Each run writes one row to `harvest_log`
 (items added, links discovered, errors) so activity is visible without
 digging through server logs.
+
+**Seed crawling is split into 4 rotating groups**, not "every active seed,
+every run" — that stopped fitting comfortably in one run once the seed list
+grew. Each `seed_urls` row has a `seed_group` (0–3), assigned round-robin
+via a persistent cursor (`seed_group_cursor` in `settings`) at the moment a
+seed becomes active — `assign_next_seed_group()` in `harvester.php`, called
+from `seeds.php`'s "add" and "approve" actions. Deliberately *not* `id % 4`:
+that drifts uneven as seeds get deleted over time (confirmed in practice —
+one group ended up several seeds behind the others after normal churn),
+where a persistent cursor stays balanced regardless of gaps in the id
+sequence. Which group crawls is purely a function of the current 15-minute
+slot (`current_seed_group()`): `:15`→0, `:30`→1, `:45`→2, `:00`→3. Every
+seed still gets crawled once per hour overall, just as 4 smaller passes
+instead of one large one — `crawl_due_seeds()` filters
+`WHERE active = 1 AND seed_group = ?` using that slot's group.
 
 **Why rotation, not "query everything every run":** measured locally, a
 full pass over 30+ subjects × 3 APIs took 90+ seconds — comfortably over
@@ -251,8 +278,10 @@ for infrastructure shared hosting can't provide.
 - **Seed curation is manual**: the crawler only goes where seeds point it.
   This is intentional (bounded scope) but means crawl coverage is only as
   good as the seed list — worth revisiting periodically via `seeds.php`.
-- **PubMed rate limits** without an API key are low (3 req/s); fine for
-  hourly cron batches, would need `NCBI_API_KEY` set if harvest frequency
-  increases.
+- **PubMed rate limits** without an API key are low (3 req/s); fine as-is —
+  cron now fires every 15 min (§4.3), but each of the 6 content sources
+  still self-throttles to at most once/hour independently of cron cadence
+  (§4.1), so PubMed's actual call frequency hasn't changed. Would need
+  `NCBI_API_KEY` set if that per-source cooldown itself were ever shortened.
 - **cPanel cron availability**: confirmed as standard on the MilesWeb
   Premium plan (cPanel → Cron Jobs).

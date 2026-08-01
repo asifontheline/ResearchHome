@@ -115,7 +115,7 @@ Before this is deployed to MilesWeb (where mPanel Cron Jobs takes over —
 see step 6 below), two macOS LaunchAgents run the harvester locally:
 
 ```
-~/Library/LaunchAgents/com.researchhome.harvest.plist    every 1 hour  → harvest.php
+~/Library/LaunchAgents/com.researchhome.harvest.plist    every 15 min  → harvest.php
 ~/Library/LaunchAgents/com.researchhome.discover.plist   every 30 min  → discover.php
 ```
 
@@ -191,7 +191,7 @@ backups/               mysqldump snapshots (gitignored equivalent — .htaccess-
    can silently fail:
    ```
    Command:  /usr/bin/php /home/YOURUSER/public_html/PATH/harvest.php >> /home/YOURUSER/public_html/PATH/logs/harvest.log 2>&1
-   Schedule: 0 * * * *          (every hour)
+   Schedule: */15 * * * *       (every 15 minutes)
 
    Command:  /usr/bin/php /home/YOURUSER/public_html/PATH/discover.php >> /home/YOURUSER/public_html/PATH/logs/discover.log 2>&1
    Schedule: */30 * * * *       (every 30 minutes)
@@ -204,15 +204,29 @@ backups/               mysqldump snapshots (gitignored equivalent — .htaccess-
    access, so logging cron output there is safe.
 
    `harvest.php` rotates through **one** subject across all 6 sources (not
-   the whole 30+-subject list — see `DESIGN.md` §4.3/§5 for why), crawls one
-   due seed hub page, processes a batch of the discovered-link queue, and
-   verifies a batch of existing items are still reachable (removing dead
-   links). Full subject coverage happens across many runs, by design — this
-   keeps each cron invocation (measured locally at ~30s worst case with all
-   6 sources) well under typical shared-hosting PHP execution-time limits.
-   Each of the 6 content sources also self-throttles to at most once per
-   hour regardless of cron cadence, so a shorter schedule here just wastes
-   invocations rather than over-fetching — hourly is the right cadence.
+   the whole 30+-subject list — see `DESIGN.md` §4.3/§5 for why), crawls its
+   assigned quarter of the active seed list (see below), processes a batch
+   of the discovered-link queue, and verifies a batch of existing items are
+   still reachable (removing dead links). Full subject coverage happens
+   across many runs, by design. Each of the 6 content sources self-throttles
+   to at most once per hour regardless of cron cadence, so running this
+   every 15 minutes doesn't over-fetch them — it just means the
+   seed-crawling, queue-processing, and link-health parts of the run get 4x
+   more wall-clock time per hour to work through, which matters more as the
+   seed list and catalog grow. `harvest_already_ran_this_slot()` still caps
+   it to one run per 15-minute window even if the cron entry misfires more
+   often than that.
+
+   **Seed crawling is split into 4 rotating groups**, not "all active seeds
+   every run" — each seed gets a `seed_group` (0-3), assigned round-robin
+   (a persistent cursor in `settings`, not `id % 4` — that drifts uneven
+   once seeds get deleted) the moment it's added or approved. Which group
+   runs is purely a function of the current 15-minute slot
+   (`current_seed_group()` in `includes/harvester.php`): `:15`→group 0,
+   `:30`→group 1, `:45`→group 2, `:00`→group 3. Every seed still gets
+   crawled once per hour overall, just spread across 4 smaller runs instead
+   of one large one — this matters once the seed list is large enough that
+   crawling all of it took several minutes on its own.
 
    `discover.php` only proposes new seeds (see step 7) — no content
    fetching — and self-throttles to once per 24h internally, so running it
