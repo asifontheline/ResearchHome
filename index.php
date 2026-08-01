@@ -89,8 +89,6 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
     <a class="all-link active" href="/index.php">By Subject</a>
     <span class="top-links-sep">&middot;</span>
     <a class="all-link" href="/tags.php">By Tag</a>
-    <span class="top-links-sep">&middot;</span>
-    <a class="all-link" href="/videos.php">By Video</a>
   </div>
 
   <?php foreach ($grouped['groups'] as $parent => $subjects): ?>
@@ -132,6 +130,8 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
         <a class="<?= $sort === 'recency' ? 'active' : '' ?>" href="<?= h(sort_url('recency', $q, $tagSlug)) ?>">Newest</a>
         &middot;
         <a class="<?= $sort === 'citations' ? 'active' : '' ?>" href="<?= h(sort_url('citations', $q, $tagSlug)) ?>">Most cited</a>
+        &middot;
+        <a href="/videos.php">By Video</a>
       </span>
     </p>
   <?php endif; ?>

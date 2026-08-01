@@ -54,8 +54,6 @@ require __DIR__ . '/includes/header.php';
     <a class="all-link" href="/index.php">By Subject</a>
     <span class="top-links-sep">&middot;</span>
     <a class="all-link" href="/tags.php">By Tag</a>
-    <span class="top-links-sep">&middot;</span>
-    <a class="all-link active" href="/videos.php">By Video</a>
   </div>
 
   <?php if ($grouped['groups']): ?>
