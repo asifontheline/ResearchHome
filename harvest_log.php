@@ -10,6 +10,15 @@ $searchMisses = db()->query(
     "SELECT query, search_count, first_searched_at, harvested_at, items_found
      FROM search_misses ORDER BY harvested_at IS NULL DESC, search_count DESC, first_searched_at DESC LIMIT 20"
 )->fetchAll();
+$searchStats = db()->query(
+    "SELECT COUNT(*) AS total, SUM(result_count = 0) AS misses
+     FROM search_log WHERE searched_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+)->fetch();
+$topSearches = db()->query(
+    "SELECT query, COUNT(*) AS times, SUM(result_count = 0) AS miss_times, MAX(result_count) AS last_result_count
+     FROM search_log WHERE searched_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+     GROUP BY query ORDER BY times DESC LIMIT 20"
+)->fetchAll();
 $mapPointsAll = get_traffic_map_points('all');
 
 $pageTitle = 'Harvest log';
@@ -97,6 +106,36 @@ require __DIR__ . '/includes/header.php';
     <?php endif; ?>
   </div>
 </div>
+
+<hr class="section-divider">
+
+<h2>Search activity (7d)</h2>
+<p class="muted">
+  Every search-bar keyword, hit or miss — separate from the queue below,
+  which exists only to feed the harvester.
+  <?php if ($searchStats['total']): ?>
+    <?= number_format((int)$searchStats['total']) ?> searches,
+    <?= number_format((int)$searchStats['misses']) ?> came up empty
+    (<?= round(100 * $searchStats['misses'] / $searchStats['total']) ?>% miss rate).
+  <?php else: ?>
+    No searches logged yet.
+  <?php endif; ?>
+</p>
+<?php if ($topSearches): ?>
+  <table class="seed-table">
+    <thead><tr><th>Query</th><th>Times searched</th><th>Times empty</th><th>Last result count</th></tr></thead>
+    <tbody>
+      <?php foreach ($topSearches as $s): ?>
+        <tr>
+          <td><?= h($s['query']) ?></td>
+          <td><?= (int)$s['times'] ?></td>
+          <td><?= (int)$s['miss_times'] ?></td>
+          <td><?= (int)$s['last_result_count'] ?></td>
+        </tr>
+      <?php endforeach; ?>
+    </tbody>
+  </table>
+<?php endif; ?>
 
 <hr class="section-divider">
 

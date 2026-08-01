@@ -29,6 +29,15 @@ $countStmt->execute($params);
 $totalItems = (int) $countStmt->fetchColumn();
 $totalPages = max(1, (int) ceil($totalItems / $perPage));
 
+// Every typed search-bar keyword, hit or miss — plain visibility log,
+// separate from the miss-queueing below. Deliberately only the q= case
+// (typed keywords), not tag/subject pill clicks — those are "selections",
+// already visible via the curated subject list itself, not something
+// someone typed.
+if ($q !== '') {
+    record_search_log($q, $totalItems);
+}
+
 // A real text search with nothing back — queue it for the harvester to try
 // as a one-off keyword search (see harvest_search_misses() in harvester.php).
 // Subject/tag pill clicks (a "selection", not a typed keyword) get the same

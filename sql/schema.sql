@@ -164,6 +164,21 @@ CREATE TABLE IF NOT EXISTS search_misses (
     KEY idx_harvested_at (harvested_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Every search-bar keyword submission, hit or miss — distinct from
+-- search_misses above, which exists purely to queue zero-result queries
+-- for the harvester. This is for visibility: what people actually search
+-- for, and what fraction comes up empty. One row per submission (not
+-- deduped/counted like search_misses) since result_count can change
+-- between two searches of the same term as the catalog grows.
+CREATE TABLE IF NOT EXISTS search_log (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    query VARCHAR(255) NOT NULL,
+    result_count INT UNSIGNED NOT NULL,
+    searched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_searched_at (searched_at),
+    KEY idx_query (query)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- One row per harvest.php or discover.php run, for visibility since nothing
 -- is added by hand.
 CREATE TABLE IF NOT EXISTS harvest_log (

@@ -202,6 +202,23 @@ function record_search_miss(string $q): void {
 }
 
 /**
+ * Every search-bar keyword submission, hit or miss — see search_log's
+ * schema comment for how this differs from record_search_miss() above
+ * (that one dedups/counts and exists to drive harvesting; this one is a
+ * plain visibility log of what people actually search for).
+ */
+function record_search_log(string $q, int $resultCount): void {
+    $q = trim(mb_strimwidth($q, 0, 255, ''));
+    if ($q === '') return;
+    try {
+        db()->prepare('INSERT INTO search_log (query, result_count) VALUES (?, ?)')
+            ->execute([$q, $resultCount]);
+    } catch (Throwable $e) {
+        // Never let this break the search page itself.
+    }
+}
+
+/**
  * Direct search links on other free/open portals, for when we genuinely
  * have nothing yet — a positive next step instead of a dead end while the
  * queued search above waits for the next harvest run.
