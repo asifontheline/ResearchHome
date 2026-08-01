@@ -31,10 +31,28 @@ $totalPages = max(1, (int) ceil($totalItems / $perPage));
 
 // A real text search with nothing back — queue it for the harvester to try
 // as a one-off keyword search (see harvest_search_misses() in harvester.php).
-// A tag filter with no matches isn't a "search miss" in that sense, so this
-// only fires for the q= case.
-if ($q !== '' && $totalItems === 0) {
-    record_search_miss($q);
+// Subject/tag pill clicks (a "selection", not a typed keyword) get the same
+// treatment when they land on zero results — the curated subject bar shows
+// every subject regardless of current count, so clicking a currently-empty
+// one is a real, common miss, not a hypothetical. Queued using that
+// subject's own proven search keyword (the same one run_api_harvest()
+// already uses for it) when it's a curated subject, falling back to the
+// tag's stored name for specialized/source-derived tags outside the
+// curated list.
+if ($totalItems === 0) {
+    if ($q !== '') {
+        record_search_miss($q);
+    } elseif ($tagSlug !== '') {
+        $subjectDefs = require __DIR__ . '/includes/subjects.php';
+        if (isset($subjectDefs[$tagSlug])) {
+            $missTerm = $subjectDefs[$tagSlug]['keywords'][0];
+        } else {
+            $tagRow = db()->prepare('SELECT name FROM tags WHERE slug = ?');
+            $tagRow->execute([$tagSlug]);
+            $missTerm = $tagRow->fetchColumn() ?: str_replace('-', ' ', $tagSlug);
+        }
+        record_search_miss($missTerm);
+    }
 }
 
 $page = max(1, min($totalPages, (int) ($_GET['page'] ?? 1)));
