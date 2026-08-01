@@ -1524,6 +1524,13 @@ function process_feedback_emails(): array {
         return ['created' => 0]; // already checked today
     }
 
+    // Logged to harvest_log from here on — this is a real attempt, not a
+    // no-op, so it should show up in the admin run history same as
+    // harvest/discovery runs (items_added repurposed as "issues created").
+    $logPdo = db();
+    $logPdo->prepare("INSERT INTO harvest_log (started_at, run_type) VALUES (NOW(), 'feedback')")->execute();
+    $logId = (int) $logPdo->lastInsertId();
+
     $port = defined('FEEDBACK_IMAP_PORT') && FEEDBACK_IMAP_PORT ? (int)FEEDBACK_IMAP_PORT : 993;
     $mailbox = '{' . FEEDBACK_IMAP_HOST . ':' . $port . '/imap/ssl}INBOX';
     $conn = @imap_open($mailbox, FEEDBACK_IMAP_USER, FEEDBACK_IMAP_PASSWORD);
@@ -1531,7 +1538,10 @@ function process_feedback_emails(): array {
         // Deliberately not marking today as checked — a transient
         // connection failure should retry on the next 15-minute tick, not
         // silently skip the whole day.
-        return ['created' => 0, 'errors' => ['IMAP connection failed: ' . imap_last_error()]];
+        $connError = 'IMAP connection failed: ' . imap_last_error();
+        db()->prepare('UPDATE harvest_log SET finished_at = NOW(), errors = 1, detail = ? WHERE id = ?')
+            ->execute([$connError, $logId]);
+        return ['created' => 0, 'errors' => [$connError]];
     }
     set_setting('feedback_email_last_checked_date', $today);
 
@@ -1585,5 +1595,9 @@ function process_feedback_emails(): array {
     }
 
     imap_close($conn);
+
+    db()->prepare('UPDATE harvest_log SET finished_at = NOW(), items_added = ?, errors = ?, detail = ? WHERE id = ?')
+        ->execute([$created, count($errors), implode("\n", $errors), $logId]);
+
     return ['created' => $created, 'errors' => $errors];
 }
