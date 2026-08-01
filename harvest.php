@@ -21,7 +21,7 @@ if (!$isCli) {
     }
 }
 
-// CLI (cron) gets the full run budget (HARVEST_MAX_RUNTIME_MINUTES, 59) —
+// CLI (cron) gets the full run budget (HARVEST_MAX_RUNTIME_MINUTES, 14) —
 // run_content_harvest()'s own soft time-budget checks are what actually
 // stop it early; this is just the outer safety net. The admin "run now"
 // web trigger stays short — a human is waiting on that request, a
@@ -30,11 +30,15 @@ set_time_limit($isCli ? HARVEST_MAX_RUNTIME_MINUTES * 60 : 240);
 
 $result = run_content_harvest();
 
-// Rides along on this cron job instead of needing its own — self-expiring,
-// no-ops once MONITOR_EMAIL is unset or the window has closed. See
-// run_monitor_check() in includes/harvester.php.
+// Both ride along on this cron job instead of needing their own.
 if ($isCli) {
+    // Self-expiring, no-ops once MONITOR_EMAIL is unset or the window has
+    // closed. See run_monitor_check() in includes/harvester.php.
     run_monitor_check();
+
+    // No-ops unless FEEDBACK_IMAP_HOST/GITHUB_TOKEN are configured. See
+    // process_feedback_emails() in includes/harvester.php.
+    process_feedback_emails();
 }
 
 if ($isCli) {

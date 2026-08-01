@@ -1499,3 +1499,79 @@ function run_monitor_check(): array {
 
     return ['sent' => $sent, 'window_open' => $windowOpen, 'expires_at' => $expiresAt];
 }
+
+// ---- Feedback email -> GitHub issue ---------------------------------------
+//
+// Rides along on the harvest cron the same way run_monitor_check() does —
+// no separate cron entry needed. Silently no-ops if either FEEDBACK_IMAP_HOST
+// or GITHUB_TOKEN isn't configured. Auto-created issues are labeled
+// 'email-submission' deliberately, not treated as pre-vetted: anyone who
+// knows the feedback address can get an issue created on the public repo
+// with whatever they send, with no human review before it's public — the
+// label exists so these are easy to spot and triage, not to imply they've
+// already been checked.
+
+function process_feedback_emails(): array {
+    if (!defined('FEEDBACK_IMAP_HOST') || !FEEDBACK_IMAP_HOST || !defined('GITHUB_TOKEN') || !GITHUB_TOKEN) {
+        return ['created' => 0]; // not configured — silently skip, not an error
+    }
+
+    $port = defined('FEEDBACK_IMAP_PORT') && FEEDBACK_IMAP_PORT ? (int)FEEDBACK_IMAP_PORT : 993;
+    $mailbox = '{' . FEEDBACK_IMAP_HOST . ':' . $port . '/imap/ssl}INBOX';
+    $conn = @imap_open($mailbox, FEEDBACK_IMAP_USER, FEEDBACK_IMAP_PASSWORD);
+    if (!$conn) {
+        return ['created' => 0, 'errors' => ['IMAP connection failed: ' . imap_last_error()]];
+    }
+
+    $created = 0;
+    $errors = [];
+    $emailNums = imap_search($conn, 'UNSEEN') ?: [];
+
+    foreach ($emailNums as $num) {
+        $header = imap_headerinfo($conn, $num);
+        $subject = isset($header->subject) ? imap_utf8($header->subject) : '(no subject)';
+        $fromPart = $header->from[0] ?? null;
+        $fromAddr = $fromPart ? ($fromPart->mailbox . '@' . $fromPart->host) : 'unknown sender';
+
+        $body = trim((string) imap_fetchbody($conn, $num, '1'));
+        if ($body === '') {
+            $body = trim((string) imap_body($conn, $num)); // non-multipart fallback
+        }
+        $body = trim(quoted_printable_decode($body));
+        $body = mb_strimwidth($body, 0, 5000, "\n…(truncated)");
+
+        $issueTitle = mb_strimwidth("[Email] {$subject}", 0, 250, '');
+        $issueBody = "Submitted via email from {$fromAddr}\n\n---\n\n" . ($body !== '' ? $body : '(empty message body)');
+
+        $ch = curl_init('https://api.github.com/repos/' . GITHUB_REPO . '/issues');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . GITHUB_TOKEN,
+                'Accept: application/vnd.github+json',
+                'User-Agent: ResHub-Feedback-Bot',
+                'Content-Type: application/json',
+            ],
+            CURLOPT_POSTFIELDS => json_encode([
+                'title' => $issueTitle,
+                'body' => $issueBody,
+                'labels' => ['email-submission'],
+            ]),
+        ]);
+        $response = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($code >= 200 && $code < 300) {
+            imap_setflag_full($conn, (string)$num, '\\Seen');
+            $created++;
+        } else {
+            $errors[] = "Failed to create issue for email #{$num} (\"{$subject}\"): HTTP {$code} " . substr((string)$response, 0, 200);
+        }
+    }
+
+    imap_close($conn);
+    return ['created' => $created, 'errors' => $errors];
+}

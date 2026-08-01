@@ -56,3 +56,18 @@ define('YOUTUBE_API_KEY', '');
 // https://developer.vimeo.com/apps (create an app, generate an
 // unauthenticated/personal token with "Public" scope).
 define('VIMEO_ACCESS_TOKEN', '');
+
+// Optional: auto-creates a GitHub issue (labeled 'email-submission', not
+// pre-vetted — see process_feedback_emails() in includes/harvester.php) for
+// every unread email in FEEDBACK_EMAIL's inbox, then marks it read. Rides
+// along on the harvest cron, no separate cron entry needed. Needs a
+// fine-grained GitHub personal access token scoped to ONLY this repo with
+// ONLY "Issues: Read and write" permission — nothing broader. Leave any of
+// these blank to disable entirely (falls back to "email reaches you, you
+// decide whether to open an issue yourself").
+define('FEEDBACK_IMAP_HOST', '');       // e.g. mail.yourdomain.com
+define('FEEDBACK_IMAP_PORT', '993');    // IMAP-over-SSL, standard port
+define('FEEDBACK_IMAP_USER', '');       // usually same as FEEDBACK_EMAIL
+define('FEEDBACK_IMAP_PASSWORD', '');
+define('GITHUB_TOKEN', '');
+define('GITHUB_REPO', 'asifontheline/ResearchHome');
