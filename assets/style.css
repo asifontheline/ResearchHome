@@ -317,6 +317,14 @@ nav { display: flex; gap: 1rem; }
 .external-link { font-weight: 600; }
 .item-actions { margin-top: 2rem; color: var(--muted); }
 
+.report-result {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 1rem;
+}
+
 .inline-form { display: inline; }
 .link-button {
   background: none;

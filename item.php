@@ -36,6 +36,17 @@ require __DIR__ . '/includes/header.php';
 
   <p><a class="external-link" href="<?= h($item['url']) ?>" target="_blank" rel="noopener noreferrer">Open original source ↗</a></p>
 
+  <?php if (($_GET['reported'] ?? '') === 'stillup'): ?>
+    <p class="muted report-result">Thanks for checking — this link still resolves for us. Might be temporary or region-specific on your end.</p>
+  <?php else: ?>
+    <p>
+      <form method="post" action="/report_broken_link.php" class="inline-form" onsubmit="return confirm('Report this link as broken? We\'ll re-check it and remove the item if it\'s genuinely dead.');">
+        <input type="hidden" name="id" value="<?= (int)$item['id'] ?>">
+        <button type="submit" class="link-button muted">Report broken link</button>
+      </form>
+    </p>
+  <?php endif; ?>
+
   <div class="item-tags">
     <?php foreach ($itemTags as $t): ?>
       <a class="tag-pill" href="/index.php?tag=<?= h($t['slug']) ?>"><?= h($t['name']) ?></a>

@@ -938,12 +938,20 @@ function process_queue_batch(int $limit = 20, ?float $deadline = null): array {
  */
 const LINK_FAILURE_THRESHOLD = 3;
 
+/**
+ * Random sampling, not oldest-first FIFO over a "due" queue — a queue-based
+ * approach means the backlog only ever grows as the catalog grows (more
+ * items added per run than 8/run can ever clear), same shape of problem
+ * already fixed for crawl_due_seeds()/process_queue_batch(). Random
+ * sampling has no backlog to fall behind on: every run is an independent
+ * spot-check, coverage is just statistically thinner as the catalog grows
+ * rather than falling further behind literally forever. Readers can also
+ * flag a specific dead link directly (see report_broken_link.php) instead
+ * of waiting on this to eventually sample it.
+ */
 function check_links_batch(int $limit = 8, ?float $deadline = null): array {
     $rows = db()->query(
-        "SELECT id, url, failed_checks FROM items
-         WHERE last_checked_at IS NULL OR last_checked_at < DATE_SUB(NOW(), INTERVAL 7 DAY)
-         ORDER BY last_checked_at IS NOT NULL, last_checked_at ASC
-         LIMIT " . (int)$limit
+        "SELECT id, url, failed_checks FROM items ORDER BY RAND() LIMIT " . (int)$limit
     )->fetchAll();
 
     $checked = 0;

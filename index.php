@@ -110,6 +110,9 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
 </nav>
 
 <section class="content">
+  <?php if (($_GET['reported'] ?? '') === 'removed'): ?>
+    <p class="muted report-result">Confirmed unreachable — removed from the catalog. Thanks for the report.</p>
+  <?php endif; ?>
   <?php if ($q || $tagSlug): ?>
     <p class="filter-summary">
       <?php if ($q): ?>Search: “<?= h($q) ?>”<?php endif; ?>
