@@ -1503,25 +1503,37 @@ function run_monitor_check(): array {
 // ---- Feedback email -> GitHub issue ---------------------------------------
 //
 // Rides along on the harvest cron the same way run_monitor_check() does —
-// no separate cron entry needed. Silently no-ops if either FEEDBACK_IMAP_HOST
-// or GITHUB_TOKEN isn't configured. Auto-created issues are labeled
-// 'email-submission' deliberately, not treated as pre-vetted: anyone who
-// knows the feedback address can get an issue created on the public repo
-// with whatever they send, with no human review before it's public — the
-// label exists so these are easy to spot and triage, not to imply they've
-// already been checked.
+// no separate cron entry needed — but only actually checks the mailbox once
+// per day (the first cron tick after midnight UTC), not every 15-minute
+// slot; a daily poll is plenty for feedback email and cuts down on IMAP
+// connections. Silently no-ops if either FEEDBACK_IMAP_HOST or GITHUB_TOKEN
+// isn't configured. Auto-created issues are labeled 'email-submission'
+// deliberately, not treated as pre-vetted: anyone who knows the feedback
+// address can get an issue created on the public repo with whatever they
+// send, with no human review before it's public — the label exists so
+// these are easy to spot and triage, not to imply they've already been
+// checked.
 
 function process_feedback_emails(): array {
     if (!defined('FEEDBACK_IMAP_HOST') || !FEEDBACK_IMAP_HOST || !defined('GITHUB_TOKEN') || !GITHUB_TOKEN) {
         return ['created' => 0]; // not configured — silently skip, not an error
     }
 
+    $today = date('Y-m-d');
+    if (get_setting('feedback_email_last_checked_date') === $today) {
+        return ['created' => 0]; // already checked today
+    }
+
     $port = defined('FEEDBACK_IMAP_PORT') && FEEDBACK_IMAP_PORT ? (int)FEEDBACK_IMAP_PORT : 993;
     $mailbox = '{' . FEEDBACK_IMAP_HOST . ':' . $port . '/imap/ssl}INBOX';
     $conn = @imap_open($mailbox, FEEDBACK_IMAP_USER, FEEDBACK_IMAP_PASSWORD);
     if (!$conn) {
+        // Deliberately not marking today as checked — a transient
+        // connection failure should retry on the next 15-minute tick, not
+        // silently skip the whole day.
         return ['created' => 0, 'errors' => ['IMAP connection failed: ' . imap_last_error()]];
     }
+    set_setting('feedback_email_last_checked_date', $today);
 
     $created = 0;
     $errors = [];
