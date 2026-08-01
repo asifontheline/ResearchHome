@@ -521,15 +521,17 @@ function all_contributing_sources(): array {
     return $rows;
 }
 
-function all_tags_with_counts(): array {
-    return db()->query(
+function all_tags_with_counts(string $contentType = 'research'): array {
+    $stmt = db()->prepare(
         "SELECT t.id, t.name, t.slug, COUNT(i.id) AS item_count
          FROM tags t
          LEFT JOIN item_tags it ON it.tag_id = t.id
-         LEFT JOIN items i ON i.id = it.item_id AND i.content_type = 'research'
+         LEFT JOIN items i ON i.id = it.item_id AND i.content_type = ?
          GROUP BY t.id
          ORDER BY t.name"
-    )->fetchAll();
+    );
+    $stmt->execute([$contentType]);
+    return $stmt->fetchAll();
 }
 
 function get_catalog_summary(): array {
@@ -684,10 +686,11 @@ function subject_label(?string $slug): string {
 const OTHER_TAG_PROMOTION_THRESHOLD = 2;
 const SPECIALIZED_TOPICS_SHOWN = 2;
 
-function get_grouped_subjects(): array {
+function get_grouped_subjects(string $contentType = 'research'): array {
     $subjects = require __DIR__ . '/subjects.php';
+    $tagCounts = all_tags_with_counts($contentType);
     $counts = [];
-    foreach (all_tags_with_counts() as $t) {
+    foreach ($tagCounts as $t) {
         $counts[$t['slug']] = (int) $t['item_count'];
     }
 
@@ -703,7 +706,7 @@ function get_grouped_subjects(): array {
 
     $knownSlugs = array_keys($subjects);
     $specialized = [];
-    foreach (all_tags_with_counts() as $t) {
+    foreach ($tagCounts as $t) {
         if (!in_array($t['slug'], $knownSlugs, true) && (int) $t['item_count'] > OTHER_TAG_PROMOTION_THRESHOLD) {
             $specialized[] = ['slug' => $t['slug'], 'label' => $t['name'], 'count' => (int) $t['item_count']];
         }

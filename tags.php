@@ -14,6 +14,8 @@ require __DIR__ . '/includes/header.php';
     <a class="all-link" href="/index.php">By Subject</a>
     <span class="top-links-sep">&middot;</span>
     <a class="all-link active" href="/tags.php">By Tag</a>
+    <span class="top-links-sep">&middot;</span>
+    <a class="all-link" href="/videos.php">By Video</a>
   </div>
 
   <h1>All tags</h1>
