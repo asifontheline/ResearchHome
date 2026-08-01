@@ -827,6 +827,30 @@ function crawl_due_seeds(int $limit = 3, ?float $deadline = null): array {
             // connection, log it, and move on.
             db(true);
             $errors[] = "seed {$seed['id']} ({$seed['url']}): " . $e->getMessage();
+
+            // This path used to skip last_crawled_at/failed_fetches
+            // entirely, unlike the normal fetch-failure path below — which
+            // left a seed that reliably triggers this exception (a
+            // consistently slow page holding the connection open past
+            // MySQL's wait_timeout) permanently stuck at the front of the
+            // "oldest first" rotation. Confirmed on production: one seed
+            // had last_crawled_at NULL after a full week — hitting this
+            // exact error on literally every single run, forever, since it
+            // never aged out or accumulated toward auto-disable like any
+            // other failure does.
+            try {
+                $failures = (int) $seed['failed_fetches'] + 1;
+                if ($failures >= SEED_FAILURE_THRESHOLD) {
+                    db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ?, active = 0 WHERE id = ?')
+                        ->execute([$failures, $seed['id']]);
+                } else {
+                    db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ? WHERE id = ?')
+                        ->execute([$failures, $seed['id']]);
+                }
+            } catch (Throwable $e2) {
+                // Even the reconnect+update attempt failed; move on rather
+                // than crash the whole batch over one row.
+            }
         }
     }
     return ['discovered' => $discovered, 'errors' => $errors];
