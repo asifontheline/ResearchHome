@@ -851,14 +851,32 @@ function reactivate_cooled_down_seeds(): int {
     return $stmt->rowCount();
 }
 
-function crawl_due_seeds(int $limit = 3, ?float $deadline = null): array {
+/**
+ * Cron now fires every 15 minutes instead of hourly — rather than every
+ * tick trying all active seeds (redundant re-scanning of the same hub
+ * pages 4x as often, and each full pass had already been taking several
+ * minutes on its own), seeds are split into 4 non-overlapping groups by
+ * `id % 4` and each 15-minute slot only crawls its own group. Every seed
+ * still gets touched once per hour overall, just spread across 4 smaller,
+ * faster runs instead of one large one. Mapping is fixed, not
+ * config-driven: :15 -> group 0, :30 -> group 1, :45 -> group 2,
+ * :00 -> group 3.
+ */
+function current_seed_group(): int {
+    $minute = (int) date('i');
+    return (intdiv($minute, 15) + 3) % 4;
+}
+
+function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
     reactivate_cooled_down_seeds();
 
-    $stmt = db()->query(
-        "SELECT * FROM seed_urls WHERE active = 1
+    $group = current_seed_group();
+    $stmt = db()->prepare(
+        "SELECT * FROM seed_urls WHERE active = 1 AND id % 4 = ?
          ORDER BY (last_crawled_at IS NULL) DESC, last_crawled_at ASC
          LIMIT " . (int)$limit
     );
+    $stmt->execute([$group]);
     $seeds = $stmt->fetchAll();
 
     $discovered = 0;
@@ -1135,21 +1153,29 @@ function check_links_batch(int $limit = 8, ?float $deadline = null): array {
 
 // ---- Orchestrator -------------------------------------------------------
 
-// Must stay under the cron interval (hourly) so a genuinely-stuck run's
-// lock self-heals before the next tick would otherwise be blocked forever.
-const HARVEST_MAX_RUNTIME_MINUTES = 59;
+// Must stay under the cron interval so a genuinely-stuck run's lock
+// self-heals before the next tick would otherwise be blocked forever. Cron
+// now fires every 15 minutes (was hourly) — shortened to match, so a
+// crashed run's lock clears before the very next slot instead of
+// potentially blocking up to 4 ticks under the old 59-minute timeout.
+const HARVEST_MAX_RUNTIME_MINUTES = 14;
 
 /**
- * True if a harvest run has already started this clock hour (>= HH:00:00).
- * A hard cap independent of the lock above — the lock only stops two runs
- * overlapping in time, it doesn't stop a stray extra cron entry (or a
- * misfiring host scheduler) from firing a second complete run within the
- * same hour once the first one has already finished and released its lock.
+ * True if a harvest run has already started in this 15-minute slot
+ * (:00/:15/:30/:45). A hard cap independent of the lock above — the lock
+ * only stops two runs overlapping in time, it doesn't stop a stray extra
+ * cron entry (or a misfiring host scheduler) from firing a second complete
+ * run within the same slot once the first one has already finished and
+ * released its lock. Was "already ran this hour" — cron firing 4x/hour is
+ * now intentional (see current_seed_group()), not a misconfiguration to
+ * guard against, so the cap moved from hourly to per-slot instead of being
+ * removed outright.
  */
-function harvest_already_ran_this_hour(): bool {
-    $hourStart = date('Y-m-d H:00:00');
+function harvest_already_ran_this_slot(): bool {
+    $minute = (int) date('i');
+    $slotStart = date('Y-m-d H:') . str_pad((string)(intdiv($minute, 15) * 15), 2, '0', STR_PAD_LEFT) . ':00';
     $stmt = db()->prepare("SELECT 1 FROM harvest_log WHERE run_type = 'harvest' AND started_at >= ? LIMIT 1");
-    $stmt->execute([$hourStart]);
+    $stmt->execute([$slotStart]);
     return (bool) $stmt->fetchColumn();
 }
 
@@ -1160,11 +1186,11 @@ function harvest_already_ran_this_hour(): bool {
  * mostly no-op cheaply rather than doing redundant work.
  */
 function run_content_harvest(): array {
-    if (harvest_already_ran_this_hour()) {
+    if (harvest_already_ran_this_slot()) {
         return [
             'items_added' => 0, 'links_discovered' => 0, 'links_checked' => 0,
             'items_removed' => 0, 'new_hosts_discovered' => 0,
-            'errors' => ['Skipped: a harvest run already started this hour (' . date('Y-m-d H:00') . ' UTC) — capped to one per hour regardless of how many times this gets invoked.'],
+            'errors' => ['Skipped: a harvest run already started in this 15-minute slot — capped to one per slot regardless of how many times this gets invoked.'],
         ];
     }
 
@@ -1218,14 +1244,11 @@ function run_content_harvest(): array {
         $videoItemsAdded = $video['added'];
         $errors = array_merge($errors, $video['errors']);
 
-        // Was 3 — at that rate, with 119 active seeds and harvest capped to
-        // one run/hour, a seed could go 40+ hours between attempts, and the
-        // 24 that had literally never been crawled once would take 8 hours
-        // just to all get their first try. Sized well above the current
-        // active-seed count so every seed gets touched at least once per
-        // run; the deadline check inside the loop still protects against
-        // this ever eating the whole time budget if the seed list grows a
-        // lot further.
+        // 200 comfortably covers a quarter of the active-seed count (see
+        // current_seed_group() — each 15-minute slot only crawls its own
+        // group of ~1/4 the seeds now), with the deadline check inside the
+        // loop still protecting against this eating the whole time budget
+        // if the seed list grows a lot further.
         $seeds = crawl_due_seeds(200, $deadline);
         $linksDiscovered = $seeds['discovered'];
         $errors = array_merge($errors, $seeds['errors']);
