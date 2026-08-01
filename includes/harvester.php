@@ -867,12 +867,27 @@ function current_seed_group(): int {
     return (intdiv($minute, 15) + 3) % 4;
 }
 
+/**
+ * Round-robin group assignment via a persistent cursor (settings table),
+ * not id % 4 — that drifts uneven once seeds get deleted (confirmed: one
+ * group already sitting several seeds behind the others after normal
+ * churn). Called once, at the moment a seed actually becomes active
+ * (admin adds one directly, or approves a discovered one) — re-enabling a
+ * previously-active seed keeps whatever group it already had rather than
+ * reassigning, since it's not new.
+ */
+function assign_next_seed_group(int $seedId): void {
+    $cursor = (int) get_setting('seed_group_cursor', '0') % 4;
+    db()->prepare('UPDATE seed_urls SET seed_group = ? WHERE id = ?')->execute([$cursor, $seedId]);
+    set_setting('seed_group_cursor', (string) (($cursor + 1) % 4));
+}
+
 function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
     reactivate_cooled_down_seeds();
 
     $group = current_seed_group();
     $stmt = db()->prepare(
-        "SELECT * FROM seed_urls WHERE active = 1 AND id % 4 = ?
+        "SELECT * FROM seed_urls WHERE active = 1 AND seed_group = ?
          ORDER BY (last_crawled_at IS NULL) DESC, last_crawled_at ASC
          LIMIT " . (int)$limit
     );

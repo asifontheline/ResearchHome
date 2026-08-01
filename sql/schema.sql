@@ -80,11 +80,13 @@ CREATE TABLE IF NOT EXISTS seed_urls (
     active TINYINT(1) NOT NULL DEFAULT 1,
     discovered TINYINT(1) NOT NULL DEFAULT 0,   -- 1 = proposed by discover_new_seeds(), not manually added
     discovery_source VARCHAR(64) DEFAULT NULL,  -- e.g. 'openalex-sources', 'crawler-hub-heuristic'
+    seed_group TINYINT UNSIGNED DEFAULT NULL,   -- 0-3, which 15-min cron slot crawls this seed (see current_seed_group() in harvester.php); assigned round-robin at add/approve time, not derived from id (id % 4 drifts uneven once seeds get deleted)
     added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_crawled_at DATETIME DEFAULT NULL,
     failed_fetches TINYINT UNSIGNED NOT NULL DEFAULT 0, -- auto-disabled past SEED_FAILURE_THRESHOLD (harvester.php)
     UNIQUE KEY uniq_url (url(255)),
-    KEY idx_host (host)
+    KEY idx_host (host),
+    KEY idx_seed_group (seed_group)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Discovered links waiting to be visited (depth-1 from a seed hub page).

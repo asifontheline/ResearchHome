@@ -15,12 +15,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = 'Enter a valid hub/listing page URL.';
         } else {
             $host = parse_url($url, PHP_URL_HOST);
-            db()->prepare('INSERT IGNORE INTO seed_urls (url, host, subject_slug) VALUES (?, ?, ?)')
-                ->execute([$url, $host, $subjectSlug]);
+            $stmt = db()->prepare('INSERT IGNORE INTO seed_urls (url, host, subject_slug) VALUES (?, ?, ?)');
+            $stmt->execute([$url, $host, $subjectSlug]);
+            // Admin-added seeds start active=1 immediately (unlike a
+            // discovered one awaiting review), so it needs a crawl-slot
+            // group right away too.
+            if ($stmt->rowCount() > 0) {
+                assign_next_seed_group((int) db()->lastInsertId());
+            }
         }
     } elseif ($action === 'approve') {
         $id = (int)($_POST['id'] ?? 0);
         db()->prepare('UPDATE seed_urls SET active = 1, discovered = 0 WHERE id = ?')->execute([$id]);
+        assign_next_seed_group($id);
     } elseif ($action === 'toggle') {
         $id = (int)($_POST['id'] ?? 0);
         $current = db()->prepare('SELECT active FROM seed_urls WHERE id = ?');
