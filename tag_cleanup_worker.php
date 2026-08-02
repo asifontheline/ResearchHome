@@ -33,12 +33,34 @@ if (!$hasValidKey) {
     require_login();
 }
 
+// Overlap protection, same acquire_run_lock()/release_run_lock() mechanism
+// harvest.php uses for its own runs. Necessary, not optional, once this is
+// driven by cron: safe_http_get()'s own CURLOPT_TIMEOUT is 15s, and the
+// deadline below is only checked *between* items, not mid-fetch -- a slow
+// external site can push a single request's real wall-clock time well
+// past its nominal 12s slice. A 1-minute cron firing on top of that WILL
+// overlap itself eventually, and each overlapping run holds its own DB
+// connection for the duration -- confirmed on production, this took the
+// shared MySQL connection limit down (PDOException: "Too many
+// connections"), which then broke harvest.php's own runs too. 2-minute
+// lock window covers the realistic worst case with margin; a genuinely
+// stuck run self-heals after that, same as harvest's lock does.
+if (!acquire_run_lock('tag_cleanup', 2)) {
+    header('Content-Type: text/html; charset=utf-8');
+    echo '<p>Skipped -- another tag-cleanup run is still within its window. Avoiding an overlapping run.</p>';
+    exit;
+}
+
 // Short enough that this request finishes fast regardless -- these two
 // batches are already individually time-budgeted, this is just a ceiling.
 $sliceDeadline = microtime(true) + 12;
 
-$retag = retag_backlog_batch(500, $sliceDeadline);
-$zeroTag = classify_zero_tag_backlog(15, $sliceDeadline);
+try {
+    $retag = retag_backlog_batch(500, $sliceDeadline);
+    $zeroTag = classify_zero_tag_backlog(15, $sliceDeadline);
+} finally {
+    release_run_lock('tag_cleanup');
+}
 
 $allDone = $retag['done'] && $zeroTag['done'];
 $remaining = (int) db()->query(
@@ -50,15 +72,17 @@ header('Content-Type: text/html; charset=utf-8');
 <!doctype html>
 <html>
 <head><meta charset="utf-8"><title>Tag cleanup worker</title>
-<?php if (!$allDone): ?><meta http-equiv="refresh" content="2"><?php endif; ?>
+<?php if (!$allDone && !$hasValidKey): ?><meta http-equiv="refresh" content="2"><?php endif; ?>
 </head>
 <body style="font-family: monospace; padding: 1.5rem; line-height: 1.6;">
-<h3><?= $allDone ? 'DONE — backlog fully cleared.' : 'Working — page refreshes every 2s…' ?></h3>
+<h3><?= $allDone ? 'DONE — backlog fully cleared.' : 'Working…' ?></h3>
 <p>This pass: checked <?= $retag['checked'] ?> item(s) for retagging (<?= $retag['retagged'] ?> changed, <?= $retag['rescued'] ?> rescued from zero tags),
 checked <?= $zeroTag['checked'] ?> zero-tag item(s) via body-text scan (<?= $zeroTag['tagged'] ?> tagged).</p>
 <p>Zero-tag items remaining right now: <strong><?= $remaining ?></strong></p>
 <?php if ($allDone): ?>
-<p>Nothing left to process. Safe to delete this file now.</p>
+<p>Nothing left to process. Safe to delete this file now (and remove the cron job if you set one up).</p>
+<?php elseif ($hasValidKey): ?>
+<p>Driven by cron -- no need to keep this open.</p>
 <?php else: ?>
 <p>Leave this tab open — it'll keep going on its own.</p>
 <?php endif; ?>
