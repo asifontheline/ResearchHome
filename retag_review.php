@@ -20,6 +20,9 @@ $items = db()->query('SELECT id, title, abstract FROM items')->fetchAll();
 
 $removed = [];
 $added = [];
+$tagCountHistogram = [];
+$emptyAbstractSingleTagCount = 0;
+$singleTagCount = 0;
 
 foreach ($items as $item) {
     $currentTags = get_item_tags((int) $item['id']);
@@ -27,6 +30,15 @@ foreach ($items as $item) {
         $currentTags,
         fn($t) => in_array($t['slug'], $taxonomySlugs, true)
     ));
+
+    $n = count($currentTags);
+    $tagCountHistogram[$n] = ($tagCountHistogram[$n] ?? 0) + 1;
+    if ($n === 1) {
+        $singleTagCount++;
+        if (trim((string) ($item['abstract'] ?? '')) === '') {
+            $emptyAbstractSingleTagCount++;
+        }
+    }
 
     $newMatches = classify_subjects(trim(($item['title'] ?? '') . ' ' . ($item['abstract'] ?? '')));
 
@@ -55,6 +67,14 @@ foreach ($items as $item) {
 header('Content-Type: text/plain; charset=utf-8');
 echo $apply ? "APPLIED — changes written.\n\n" : "DRY RUN — nothing written. POST apply=1 to this URL to apply.\n\n";
 echo "Items scanned: " . count($items) . "\n\n";
+
+echo "Tag-count histogram (tags per item, all tags not just taxonomy):\n";
+ksort($tagCountHistogram);
+foreach ($tagCountHistogram as $n => $count) {
+    echo "  {$n} tag(s): {$count} item(s)\n";
+}
+echo "\nSingle-tag items: {$singleTagCount}, of which {$emptyAbstractSingleTagCount} have an empty/missing abstract"
+    . " (classify_subjects() only has the title to work with for those, so it's much less likely to multi-match).\n\n";
 
 echo "Tags to remove (" . count($removed) . "):\n";
 foreach ($removed as $r) {
