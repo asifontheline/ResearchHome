@@ -95,9 +95,9 @@ if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE
       $milestoneK = intdiv($summary['total_items'], 1000);
     ?>
     <?php if (!empty($isHomePage) && $milestoneK >= 1): ?>
-      <div class="milestone-badge" aria-label="<?= $milestoneK ?>,000 milestone">
+      <div class="milestone-badge" aria-label="<?= $milestoneK ?>,000+ milestone">
         <span class="milestone-blast" aria-hidden="true"></span>
-        <span class="milestone-text">&#127881; <span id="milestone-num" data-target="<?= $milestoneK * 1000 ?>">0</span></span>
+        <span class="milestone-text">&#127881; <span id="milestone-num" data-target="<?= $milestoneK * 1000 ?>">0</span>+</span>
       </div>
       <script>
       (function () {
