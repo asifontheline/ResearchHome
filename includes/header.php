@@ -95,10 +95,29 @@ if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE
       $milestoneK = intdiv($summary['total_items'], 1000);
     ?>
     <?php if (basename($_SERVER['SCRIPT_NAME']) === 'index.php' && $milestoneK >= 1): ?>
-      <div class="milestone-badge" aria-label="<?= $milestoneK ?>,000 articles cataloged">
+      <div class="milestone-badge" aria-label="<?= $milestoneK ?>,000 milestone">
         <span class="milestone-blast" aria-hidden="true"></span>
-        <span class="milestone-text">&#127881; <?= $milestoneK ?>,000<br><small>articles</small></span>
+        <span class="milestone-text">&#127881; <span id="milestone-num" data-target="<?= $milestoneK * 1000 ?>">0</span></span>
       </div>
+      <script>
+      (function () {
+        var el = document.getElementById('milestone-num');
+        if (!el) return;
+        var target = parseInt(el.getAttribute('data-target'), 10) || 0;
+        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          el.textContent = target.toLocaleString();
+          return;
+        }
+        var duration = 1200, start = null;
+        function step(ts) {
+          if (start === null) start = ts;
+          var progress = Math.min((ts - start) / duration, 1);
+          el.textContent = Math.floor(progress * target).toLocaleString();
+          if (progress < 1) requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+      })();
+      </script>
     <?php endif; ?>
     <nav>
       <a href="/index.php">Home</a>

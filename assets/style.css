@@ -118,25 +118,24 @@ nav { display: flex; gap: 1rem; }
 .summary-box td:first-child { color: var(--muted); }
 .summary-box td:last-child { text-align: right; font-weight: 600; }
 
-/* Homepage-only "N,000 articles" milestone badge, next to the summary box —
-   see includes/header.php. The blast is a couple of expanding rings behind
-   the box, not a full confetti library — small and self-contained on
-   purpose ("small box" per the request that added this). */
+/* Homepage-only "N,000" milestone badge, next to the summary box — see
+   includes/header.php. The blast is a couple of expanding rings behind the
+   box, not a full confetti library — small and self-contained on purpose
+   ("small box" per the request that added this). The number itself counts
+   up from 0 on load (see the inline script next to the markup). */
 .milestone-badge {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 76px;
-  height: 44px;
+  height: 34px;
   border-radius: 8px;
   background: linear-gradient(135deg, #ffb703, #ef476f);
   color: #fff;
   text-align: center;
-  line-height: 1.15;
 }
-.milestone-text { position: relative; z-index: 1; font-size: 0.72rem; font-weight: 700; }
-.milestone-text small { display: block; font-size: 0.6rem; font-weight: 500; opacity: 0.9; }
+.milestone-text { position: relative; z-index: 1; font-size: 0.78rem; font-weight: 700; white-space: nowrap; }
 .milestone-blast {
   position: absolute;
   inset: 0;
