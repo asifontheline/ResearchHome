@@ -48,19 +48,29 @@ if ($q !== '') {
 // already uses for it) when it's a curated subject, falling back to the
 // tag's stored name for specialized/source-derived tags outside the
 // curated list.
+//
+// Deliberately NOT queuing anything when $tagSlug matches neither a
+// curated subject nor a real row in `tags` — every tag pill this app ever
+// renders links to a slug that already exists, so that combination can
+// only happen via a guessed/probed URL, never a real click. Used to fall
+// back to str_replace('-', ' ', $tagSlug), which is exactly how ~20 bare
+// arXiv category codes (e.g. "cs.DC" -> "cs dc") ended up queued as
+// harvest keywords in one day — meaningless noise, not real demand.
 if ($totalItems === 0) {
     if ($q !== '') {
         record_search_miss($q);
     } elseif ($tagSlug !== '') {
         $subjectDefs = require __DIR__ . '/includes/subjects.php';
         if (isset($subjectDefs[$tagSlug])) {
-            $missTerm = $subjectDefs[$tagSlug]['keywords'][0];
+            record_search_miss($subjectDefs[$tagSlug]['keywords'][0]);
         } else {
             $tagRow = db()->prepare('SELECT name FROM tags WHERE slug = ?');
             $tagRow->execute([$tagSlug]);
-            $missTerm = $tagRow->fetchColumn() ?: str_replace('-', ' ', $tagSlug);
+            $tagName = $tagRow->fetchColumn();
+            if ($tagName) {
+                record_search_miss($tagName);
+            }
         }
-        record_search_miss($missTerm);
     }
 }
 
