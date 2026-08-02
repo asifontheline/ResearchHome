@@ -1313,21 +1313,30 @@ function retag_backlog_batch(int $limit, ?float $deadline = null): array {
  * (unlike the pure-DB retag pass).
  */
 function classify_zero_tag_backlog(int $limit, ?float $deadline = null): array {
-    $cursor = (int) get_setting('zero_tag_cursor', '0');
+    // Randomly sampled from the live "currently zero tags" set every call --
+    // NOT a monotonic id cursor. A cursor here had the exact same failure
+    // mode as retag_backlog_batch()'s first version: any item the rescue
+    // fetch failed to classify (dead link, timeout, no matching keywords
+    // even with body text) sits behind a forward-only pointer forever,
+    // reported as "done" once the cursor outruns the table while genuinely
+    // unclassified items pile up behind it. Confirmed on production: this
+    // reported done=true with 730 zero-tag items still remaining. Same
+    // random-sampling fix already used by check_links_batch() for the same
+    // FIFO-starvation reason -- items that get tagged simply drop out of
+    // this query's result set, no bookkeeping needed to avoid reprocessing
+    // them, and nothing can ever get permanently stuck behind a stale cursor.
     $stmt = db()->prepare(
         'SELECT i.id, i.title, i.url, i.abstract FROM items i
          LEFT JOIN item_tags it ON it.item_id = i.id
-         WHERE i.id > ? AND it.item_id IS NULL
-         ORDER BY i.id ASC LIMIT ' . (int) $limit
+         WHERE it.item_id IS NULL
+         ORDER BY RAND() LIMIT ' . (int) $limit
     );
-    $stmt->execute([$cursor]);
+    $stmt->execute();
     $rows = $stmt->fetchAll();
 
     $checked = 0;
     $tagged = 0;
-    $lastId = $cursor;
     foreach ($rows as $row) {
-        $lastId = (int) $row['id'];
         if ($deadline !== null && time_budget_exceeded($deadline)) break;
         $checked++;
 
@@ -1339,16 +1348,14 @@ function classify_zero_tag_backlog(int $limit, ?float $deadline = null): array {
 
         $matches = classify_subjects($text);
         if ($matches) {
-            set_item_tags($lastId, resolve_tag_ids(implode(',', $matches)));
+            set_item_tags((int) $row['id'], resolve_tag_ids(implode(',', $matches)));
             $tagged++;
         }
     }
-    set_setting('zero_tag_cursor', (string) $lastId);
 
-    // count($rows) < $limit means the query came back short of a full page
-    // -- nothing left matching right now (more could appear later as new
-    // zero-tag items get crawled in, which is fine, just not "done" forever).
-    return ['checked' => $checked, 'tagged' => $tagged, 'done' => count($rows) < $limit];
+    // No rows at all means the zero-tag set is genuinely empty right now --
+    // the only honest "done" signal under random sampling.
+    return ['checked' => $checked, 'tagged' => $tagged, 'done' => count($rows) === 0];
 }
 
 // ---- Orchestrator -------------------------------------------------------
