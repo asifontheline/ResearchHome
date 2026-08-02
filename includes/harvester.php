@@ -1345,7 +1345,10 @@ function classify_zero_tag_backlog(int $limit, ?float $deadline = null): array {
     }
     set_setting('zero_tag_cursor', (string) $lastId);
 
-    return ['checked' => $checked, 'tagged' => $tagged];
+    // count($rows) < $limit means the query came back short of a full page
+    // -- nothing left matching right now (more could appear later as new
+    // zero-tag items get crawled in, which is fine, just not "done" forever).
+    return ['checked' => $checked, 'tagged' => $tagged, 'done' => count($rows) < $limit];
 }
 
 // ---- Orchestrator -------------------------------------------------------
