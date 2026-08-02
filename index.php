@@ -17,15 +17,35 @@ if ($tagSlug !== '') {
     $params[] = $tagSlug;
 }
 
-// One boolean-mode query covers partial words, any-word matches, and
-// (via relevance ranking below) effectively surfaces all-words/exact
-// matches first -- see build_search_match() in functions.php for why this
-// replaced a separate any/all/exact mode the visitor had to pick.
+// Tries each candidate (exact phrase, then all-words-required) against a
+// real COUNT query and stops at the first one that finds something --
+// see search_match_candidates() in functions.php for why this replaced a
+// flat OR-of-every-word query, which could match a document on nothing
+// but an ordinary single word shared with the query. Falls through to the
+// existing zero-result experience (harvester queue + external portals) if
+// no candidate finds anything, rather than surfacing a loose match.
 $searchMatch = null;
 if ($q !== '') {
-    $searchMatch = build_search_match($q);
-    $where[] = 'MATCH(i.title, i.authors, i.abstract, i.notes) AGAINST (? IN BOOLEAN MODE)';
-    $params[] = $searchMatch;
+    foreach (search_match_candidates($q) as $candidate) {
+        $testWhere = array_merge($where, ['MATCH(i.title, i.authors, i.abstract, i.notes) AGAINST (? IN BOOLEAN MODE)']);
+        $testParams = array_merge($params, [$candidate]);
+        $testWhereClause = ' WHERE ' . implode(' AND ', $testWhere);
+        $stmt = db()->prepare("SELECT COUNT(DISTINCT i.id) FROM items i{$joinClause}{$testWhereClause}");
+        $stmt->execute($testParams);
+        if ((int) $stmt->fetchColumn() > 0) {
+            $searchMatch = $candidate;
+            break;
+        }
+    }
+    if ($searchMatch !== null) {
+        $where[] = 'MATCH(i.title, i.authors, i.abstract, i.notes) AGAINST (? IN BOOLEAN MODE)';
+        $params[] = $searchMatch;
+    } else {
+        // Nothing matched any candidate -- force the main query to find
+        // zero rows too (rather than silently falling back to an
+        // unfiltered/broad query) so the existing zero-result UI kicks in.
+        $where[] = '1 = 0';
+    }
 }
 
 $whereClause = $where ? ' WHERE ' . implode(' AND ', $where) : '';
