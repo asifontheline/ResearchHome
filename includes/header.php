@@ -46,8 +46,29 @@ if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE
 <body>
 <header class="site-header">
   <a class="brand" href="/index.php">🔭 ResHub</a>
+  <?php
+    // Subject select lives in the header so a search can be scoped to a
+    // subject from any page, not just after already clicking into one on
+    // the homepage — combines with the text box (both are just GET params
+    // on the same form, ANDed together same as clicking a subject pill
+    // then typing does). Grouped subjects only, not the full specialized-
+    // tag list (tags.php) — that list is long enough it'd overwhelm this
+    // dropdown; deep-linking to a specific tag still works via its own URL.
+    $headerGrouped = get_grouped_subjects();
+    $currentTagSlug = trim($_GET['tag'] ?? '');
+  ?>
   <form class="search-form" action="/index.php" method="get">
     <input type="text" name="q" placeholder="Search title, authors, abstract, notes…" value="<?= h($_GET['q'] ?? '') ?>">
+    <select name="tag" aria-label="Limit search to a subject">
+      <option value="">All subjects</option>
+      <?php foreach ($headerGrouped['groups'] as $parent => $subjects): ?>
+        <optgroup label="<?= h($parent) ?>">
+          <?php foreach ($subjects as $s): ?>
+            <option value="<?= h($s['slug']) ?>" <?= $currentTagSlug === $s['slug'] ? 'selected' : '' ?>><?= h($s['label']) ?> (<?= (int)$s['count'] ?>)</option>
+          <?php endforeach; ?>
+        </optgroup>
+      <?php endforeach; ?>
+    </select>
     <button type="submit">Search</button>
   </form>
   <div class="translate-toggle" translate="no">

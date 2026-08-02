@@ -65,15 +65,25 @@ a:hover { text-decoration: underline; }
 
 .brand { font-weight: 700; font-size: 1.1rem; color: var(--text); }
 
-.search-form { display: flex; gap: 0.5rem; flex: 1; min-width: 200px; max-width: 480px; }
+.search-form { display: flex; flex-wrap: wrap; gap: 0.5rem; flex: 1; min-width: 200px; max-width: 640px; }
 .search-form input {
   flex: 1;
+  min-width: 160px;
   padding: 0.55rem 0.8rem;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
   font-size: 0.95rem;
+}
+.search-form select {
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.8rem;
+  max-width: 150px;
 }
 .search-form button {
   padding: 0.5rem 1rem;

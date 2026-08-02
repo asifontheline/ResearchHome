@@ -219,6 +219,35 @@ function record_search_log(string $q, int $resultCount): void {
 }
 
 /**
+ * Builds a MySQL BOOLEAN MODE AGAINST() query that covers every word (and
+ * partial/prefix forms of it) in one shot, rather than asking the visitor
+ * to pick a matching strategy up front. Every word gets a trailing
+ * wildcard (e.g. "chem" matches "chemistry", "chemical"), and boolean
+ * mode's default is OR between terms, so a result needs only one word to
+ * show up at all. Items matching more of the words -- or the full phrase
+ * in order -- score higher under boolean mode's own relevance calculation
+ * regardless, so ordering by that relevance (see index.php) surfaces the
+ * closest match first without a separate "any/all/exact" toggle.
+ *
+ * Boolean-mode operator characters in the raw query (+-<>()~*"@) are
+ * stripped from each word first, so user input can't form its own (or a
+ * broken) boolean expression -- a query-syntax concern, not a security
+ * one (the result is still passed as a bound parameter).
+ */
+function build_search_match(string $q): string {
+    $words = array_values(array_filter(array_map(
+        fn($w) => preg_replace('/[+\-<>()~*"@]+/', '', $w),
+        preg_split('/\s+/', trim($q))
+    ), fn($w) => $w !== ''));
+
+    if (!$words) {
+        return $q;
+    }
+
+    return implode(' ', array_map(fn($w) => $w . '*', $words));
+}
+
+/**
  * Direct search links on other free/open portals, for when we genuinely
  * have nothing yet — a positive next step instead of a dead end while the
  * queued search above waits for the next harvest run.

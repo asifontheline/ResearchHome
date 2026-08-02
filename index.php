@@ -17,9 +17,15 @@ if ($tagSlug !== '') {
     $params[] = $tagSlug;
 }
 
+// One boolean-mode query covers partial words, any-word matches, and
+// (via relevance ranking below) effectively surfaces all-words/exact
+// matches first -- see build_search_match() in functions.php for why this
+// replaced a separate any/all/exact mode the visitor had to pick.
+$searchMatch = null;
 if ($q !== '') {
-    $where[] = 'MATCH(i.title, i.authors, i.abstract, i.notes) AGAINST (? IN NATURAL LANGUAGE MODE)';
-    $params[] = $q;
+    $searchMatch = build_search_match($q);
+    $where[] = 'MATCH(i.title, i.authors, i.abstract, i.notes) AGAINST (? IN BOOLEAN MODE)';
+    $params[] = $searchMatch;
 }
 
 $whereClause = $where ? ' WHERE ' . implode(' AND ', $where) : '';
@@ -81,11 +87,25 @@ $offset = ($page - 1) * $perPage;
 // patents) — MySQL sorts NULL as lowest, so DESC naturally puts those items
 // last rather than letting them crowd out ranked ones at the top.
 $orderBy = $sort === 'citations' ? 'i.citation_count DESC, i.added_at DESC' : 'i.added_at DESC';
-$sql = "SELECT DISTINCT i.* FROM items i{$joinClause}{$whereClause}
+$selectFields = 'i.*';
+$selectParams = $params;
+if ($searchMatch !== null) {
+    // Same MATCH() text search, recomputed as a plain relevance score
+    // (no IN BOOLEAN MODE here — a bare AGAINST() score works for ranking
+    // regardless of which mode matched the row) so a text search defaults
+    // to "closest match first" instead of "newest first". An explicit
+    // Most-cited sort still overrides it, same as before.
+    $selectFields = 'i.*, MATCH(i.title, i.authors, i.abstract, i.notes) AGAINST (?) AS relevance';
+    $selectParams = array_merge([$searchMatch], $params);
+    if ($sort !== 'citations') {
+        $orderBy = 'relevance DESC, i.added_at DESC';
+    }
+}
+$sql = "SELECT DISTINCT {$selectFields} FROM items i{$joinClause}{$whereClause}
         ORDER BY {$orderBy} LIMIT {$perPage} OFFSET {$offset}";
 
 $stmt = db()->prepare($sql);
-$stmt->execute($params);
+$stmt->execute($selectParams);
 $items = $stmt->fetchAll();
 
 $grouped = get_grouped_subjects();
@@ -106,6 +126,14 @@ function sort_url(string $sort, string $q, string $tagSlug): string {
     if ($tagSlug !== '') $params['tag'] = $tagSlug;
     if ($sort !== 'recency') $params['sort'] = $sort;
     return '/index.php' . ($params ? '?' . http_build_query($params) : '');
+}
+
+/** Builds a subject-pill link preserving the current q/sort filters (not the old tag). */
+function tag_url(string $tagSlug, string $q, string $sort = 'recency'): string {
+    $params = ['tag' => $tagSlug];
+    if ($q !== '') $params['q'] = $q;
+    if ($sort !== 'recency') $params['sort'] = $sort;
+    return '/index.php?' . http_build_query($params);
 }
 
 $pageTitle = 'Browse';
@@ -134,7 +162,7 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
       <span class="subject-group-label"><?= h($parent) ?></span>
       <div class="subject-pills">
         <?php foreach ($subjects as $s): ?>
-          <a class="tag-pill <?= $tagSlug === $s['slug'] ? 'active' : '' ?>" href="/index.php?tag=<?= h($s['slug']) ?>">
+          <a class="tag-pill <?= $tagSlug === $s['slug'] ? 'active' : '' ?>" href="<?= h(tag_url($s['slug'], $q, $sort)) ?>">
             <?= h($s['label']) ?> <span class="count"><?= (int)$s['count'] ?></span>
           </a>
         <?php endforeach; ?>
@@ -165,7 +193,7 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
       <?php if ($totalPages > 1): ?> — page <?= $page ?> of <?= number_format($totalPages) ?><?php endif; ?>
       <span class="sort-toggle">
         Sort:
-        <a class="<?= $sort === 'recency' ? 'active' : '' ?>" href="<?= h(sort_url('recency', $q, $tagSlug)) ?>">Newest</a>
+        <a class="<?= $sort === 'recency' ? 'active' : '' ?>" href="<?= h(sort_url('recency', $q, $tagSlug)) ?>"><?= $q !== '' ? 'Best match' : 'Newest' ?></a>
         &middot;
         <a class="<?= $sort === 'citations' ? 'active' : '' ?>" href="<?= h(sort_url('citations', $q, $tagSlug)) ?>">Most cited</a>
         <?php if (has_video_content()): ?>
