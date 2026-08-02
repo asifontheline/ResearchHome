@@ -16,13 +16,17 @@ $taxonomySlugs = array_keys($subjects);
 
 $apply = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['apply'] ?? '') === '1';
 
-$items = db()->query('SELECT id, title, abstract FROM items')->fetchAll();
+$items = db()->query('SELECT id, title, url, abstract, source_name FROM items')->fetchAll();
+$crawledUrls = array_flip(array_column(db()->query('SELECT url FROM crawl_queue')->fetchAll(), 'url'));
 
 $removed = [];
 $added = [];
 $tagCountHistogram = [];
 $emptyAbstractSingleTagCount = 0;
 $singleTagCount = 0;
+$zeroTagFromCrawler = 0;
+$zeroTagOther = 0;
+$zeroTagSources = [];
 
 foreach ($items as $item) {
     $currentTags = get_item_tags((int) $item['id']);
@@ -38,6 +42,15 @@ foreach ($items as $item) {
         if (trim((string) ($item['abstract'] ?? '')) === '') {
             $emptyAbstractSingleTagCount++;
         }
+    }
+    if ($n === 0) {
+        if (isset($crawledUrls[$item['url']])) {
+            $zeroTagFromCrawler++;
+        } else {
+            $zeroTagOther++;
+        }
+        $src = $item['source_name'] ?: '(none)';
+        $zeroTagSources[$src] = ($zeroTagSources[$src] ?? 0) + 1;
     }
 
     $newMatches = classify_subjects(trim(($item['title'] ?? '') . ' ' . ($item['abstract'] ?? '')));
@@ -75,6 +88,16 @@ foreach ($tagCountHistogram as $n => $count) {
 }
 echo "\nSingle-tag items: {$singleTagCount}, of which {$emptyAbstractSingleTagCount} have an empty/missing abstract"
     . " (classify_subjects() only has the title to work with for those, so it's much less likely to multi-match).\n\n";
+
+$zeroTagTotal = $zeroTagFromCrawler + $zeroTagOther;
+echo "Zero-tag items: {$zeroTagTotal} -- {$zeroTagFromCrawler} came from the generic seed crawler (crawl_queue),"
+    . " {$zeroTagOther} came from an API source path.\n";
+echo "Zero-tag items by source_name:\n";
+arsort($zeroTagSources);
+foreach ($zeroTagSources as $src => $count) {
+    echo "  {$src}: {$count}\n";
+}
+echo "\n";
 
 echo "Tags to remove (" . count($removed) . "):\n";
 foreach ($removed as $r) {
