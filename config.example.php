@@ -71,3 +71,10 @@ define('FEEDBACK_IMAP_USER', '');       // usually same as FEEDBACK_EMAIL
 define('FEEDBACK_IMAP_PASSWORD', '');
 define('GITHUB_TOKEN', '');
 define('GITHUB_REPO', 'asifontheline/ResearchHome');
+
+// Optional: lets a real cron job (curl/wget) drive tag_cleanup_worker.php
+// unattended, via ?key=<this value>, instead of needing an admin browser
+// tab left open. Generate your own with:
+//   php -r "echo bin2hex(random_bytes(24));"
+// Leave blank to require the normal admin login instead (default).
+define('TAG_CLEANUP_KEY', '');

@@ -15,10 +15,23 @@
 // stop anytime (each batch commits as it goes, via the same cursors
 // harvest.php's background job uses) and safe to re-open later. Delete
 // this file once the backlog is clear -- it's not linked from anywhere.
+//
+// Can also be driven unattended by a real cron job instead of a browser
+// tab -- a tab left open kept going idle/getting throttled/backgrounded,
+// which is real progress lost to nothing but browser behavior. Passing
+// ?key=<TAG_CLEANUP_KEY> (set in config.php) skips the login-session
+// requirement so `curl`/`wget` from cron can call this directly. Without
+// a valid key, falls back to the normal admin-login requirement exactly
+// as before.
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/harvester.php';
-require_login();
+
+$providedKey = $_GET['key'] ?? '';
+$hasValidKey = defined('TAG_CLEANUP_KEY') && TAG_CLEANUP_KEY !== '' && hash_equals(TAG_CLEANUP_KEY, $providedKey);
+if (!$hasValidKey) {
+    require_login();
+}
 
 // Short enough that this request finishes fast regardless -- these two
 // batches are already individually time-budgeted, this is just a ceiling.
