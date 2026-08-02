@@ -688,7 +688,13 @@ function classify_subjects(string $text): array {
     $matches = [];
     foreach ($subjects as $slug => $def) {
         foreach ($def['keywords'] as $kw) {
-            if (mb_strpos($text, mb_strtolower($kw)) !== false) {
+            $kw = mb_strtolower($kw);
+            // Word-boundary match, not a raw substring search — plain
+            // mb_strpos let single-word keywords fire inside unrelated
+            // words/phrases (this is how a gut-microbiota/anemia review got
+            // tagged "Law": "regulation" as a bare substring keyword matched
+            // "iron regulation" in the abstract).
+            if (preg_match('/\b' . preg_quote($kw, '/') . '\b/u', $text) === 1) {
                 $matches[] = $slug;
                 break;
             }

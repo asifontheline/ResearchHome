@@ -59,7 +59,13 @@ return [
     'urban-planning' => ['label' => 'Urban Planning', 'parent' => 'Social Sciences', 'keywords' => ['urban planning', 'city planning', 'transportation planning', 'housing policy']],
 
     // Humanities & Law
-    'law' => ['label' => 'Law', 'parent' => 'Humanities & Law', 'keywords' => ['law', 'legal', 'legislation', 'regulation', 'jurisprudence']],
+    // 'regulation' and bare 'law' used to be here but are too generic —
+    // "iron regulation", "gene regulation", "laws of thermodynamics" etc.
+    // are everyday phrasing in science writing with nothing to do with the
+    // legal system, and a bare substring/word match on either false-positive
+    // tagged unrelated science articles as Law. Kept to legally-specific
+    // compound phrases instead.
+    'law' => ['label' => 'Law', 'parent' => 'Humanities & Law', 'keywords' => ['legal', 'legislation', 'jurisprudence', 'case law', 'statute', 'regulatory compliance', 'government regulation']],
     'education' => ['label' => 'Education', 'parent' => 'Humanities & Law', 'keywords' => ['education', 'pedagogy', 'learning outcomes', 'curriculum']],
     'dissertations-theses' => ['label' => 'Dissertations & Theses', 'parent' => 'Humanities & Law', 'keywords' => ['dissertation', 'thesis', 'theses', 'doctoral thesis', 'phd thesis']],
     'linguistics' => ['label' => 'Linguistics', 'parent' => 'Humanities & Law', 'keywords' => ['linguistics', 'natural language', 'phonetics', 'syntax']],
