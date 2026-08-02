@@ -566,6 +566,25 @@ function all_tags_with_counts(string $contentType = 'research'): array {
     return $stmt->fetchAll();
 }
 
+/**
+ * True while the tag-cleanup backlog (retag_backlog_batch() /
+ * classify_zero_tag_backlog() in harvester.php, plus tag_cleanup_worker.php)
+ * still has work left -- drives the sitewide maintenance notice in
+ * header.php. Two cheap indexed COUNT-style queries, safe to run on every
+ * page load; remove this (and its call site) once the one-time backlog is
+ * fully drained and stays that way.
+ */
+function tag_cleanup_pending(): bool {
+    $maxId = (int) db()->query('SELECT MAX(id) FROM items')->fetchColumn();
+    if ($maxId === 0) return false;
+    $retagCursor = (int) get_setting('retag_cursor_v2', '0');
+    if ($retagCursor < $maxId) return true;
+    $remaining = (int) db()->query(
+        'SELECT COUNT(*) FROM items i LEFT JOIN item_tags it ON it.item_id = i.id WHERE it.item_id IS NULL'
+    )->fetchColumn();
+    return $remaining > 0;
+}
+
 function get_catalog_summary(): array {
     return [
         'total_items' => (int) db()->query("SELECT COUNT(*) FROM items WHERE content_type = 'research'")->fetchColumn(),
