@@ -99,6 +99,7 @@ function sort_url(string $sort, string $q, string $tagSlug): string {
 }
 
 $pageTitle = 'Browse';
+$isHomePage = true;
 require __DIR__ . '/includes/header.php';
 
 $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely available research — papers, patents, and articles — from arXiv, Crossref, PubMed, OpenAlex, and more. Harvested every 15 minutes, with a discovery phase every half hour looking for new sources. This is a dynamic website that discovers newly available information and adds it continuously — keep checking in and discover more!';
