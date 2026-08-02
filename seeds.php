@@ -35,11 +35,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $wasActive = (bool) $current->fetchColumn();
         // Reset the failure counter on re-enable so a manual retry gets a
         // fresh run at SEED_FAILURE_THRESHOLD rather than disabling itself
-        // again on the very next failure.
+        // again on the very next failure. Also clears block_cycles/
+        // permanently_disabled — a manual re-enable is an explicit "give it
+        // another chance" that should override the automatic permanent-disable,
+        // same as it already overrides the automatic 24h-cooldown wait.
         if ($wasActive) {
             db()->prepare('UPDATE seed_urls SET active = 0 WHERE id = ?')->execute([$id]);
         } else {
-            db()->prepare('UPDATE seed_urls SET active = 1, failed_fetches = 0 WHERE id = ?')->execute([$id]);
+            db()->prepare('UPDATE seed_urls SET active = 1, failed_fetches = 0, block_cycles = 0, permanently_disabled = 0 WHERE id = ?')->execute([$id]);
         }
     } elseif ($action === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
@@ -114,7 +117,7 @@ require __DIR__ . '/includes/header.php';
 
 <h2>Active &amp; disabled seeds</h2>
 <table class="seed-table">
-  <thead><tr><th>URL</th><th>Subject</th><th>Active</th><th>Last crawled</th><th>Successful fetches</th><th>Failed fetches</th><th></th></tr></thead>
+  <thead><tr><th>URL</th><th>Subject</th><th>Active</th><th>Last crawled</th><th>Successful fetches</th><th>Failed fetches</th><th>Block cycles</th><th></th></tr></thead>
   <tbody>
     <?php foreach ($active as $s): ?>
       <tr>
@@ -124,6 +127,15 @@ require __DIR__ . '/includes/header.php';
         <td><?= h($s['last_crawled_at'] ?? 'never') ?></td>
         <td><?= (int)$s['successful_fetches'] ?></td>
         <td><?= (int)$s['failed_fetches'] ?><?= (int)$s['failed_fetches'] >= 3 && !$s['active'] ? ' — auto-disabled' : '' ?></td>
+        <td>
+          <?php if ($s['permanently_disabled']): ?>
+            <strong><?= (int)$s['block_cycles'] ?>/7 — permanently disabled</strong>
+          <?php elseif ((int)$s['block_cycles'] > 0): ?>
+            <?= (int)$s['block_cycles'] ?>/7
+          <?php else: ?>
+            —
+          <?php endif; ?>
+        </td>
         <td>
           <form method="post" class="inline-form">
             <input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
@@ -139,7 +151,7 @@ require __DIR__ . '/includes/header.php';
       </tr>
     <?php endforeach; ?>
     <?php if (!$active): ?>
-      <tr><td colspan="7" class="muted">No seeds yet.</td></tr>
+      <tr><td colspan="8" class="muted">No seeds yet.</td></tr>
     <?php endif; ?>
   </tbody>
 </table>

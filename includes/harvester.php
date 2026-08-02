@@ -839,11 +839,39 @@ const SEED_FAILURE_THRESHOLD = 3;
  */
 const SEED_COOLDOWN_HOURS = 24;
 
+/**
+ * A seed can cycle disable -> 24h cooldown -> reactivate -> fail again
+ * forever with no exit, for a site that's genuinely, persistently
+ * bot-protected (ScienceDirect, Science, JAMA — confirmed on production,
+ * these block on every attempt). Past this many consecutive cycles with
+ * zero successes between them (~1 week, since each cycle is bounded by
+ * SEED_COOLDOWN_HOURS), stop retrying entirely — see
+ * disable_seed_after_failure(). Only a manual re-enable in seeds.php
+ * clears permanently_disabled.
+ */
+const SEED_PERMANENT_DISABLE_CYCLES = 7;
+
+/**
+ * Shared by both places a seed gets disabled after SEED_FAILURE_THRESHOLD
+ * consecutive failures (the normal fetch-failure path and the MySQL-
+ * connection-failure catch block) so block_cycles/permanently_disabled
+ * stay consistent regardless of which path triggered the disable.
+ */
+function disable_seed_after_failure(int $seedId, int $failures): void {
+    $stmt = db()->prepare('SELECT block_cycles FROM seed_urls WHERE id = ?');
+    $stmt->execute([$seedId]);
+    $cycles = (int) $stmt->fetchColumn() + 1;
+    $permanent = $cycles >= SEED_PERMANENT_DISABLE_CYCLES ? 1 : 0;
+    db()->prepare(
+        'UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ?, active = 0, block_cycles = ?, permanently_disabled = ? WHERE id = ?'
+    )->execute([$failures, $cycles, $permanent, $seedId]);
+}
+
 function reactivate_cooled_down_seeds(): int {
     $stmt = db()->prepare(
         "UPDATE seed_urls
          SET active = 1, failed_fetches = 0
-         WHERE active = 0 AND discovered = 0
+         WHERE active = 0 AND discovered = 0 AND permanently_disabled = 0
            AND failed_fetches >= ?
            AND last_crawled_at < DATE_SUB(NOW(), INTERVAL ? HOUR)"
     );
@@ -911,9 +939,12 @@ function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
             if (!$body) {
                 $failures = (int) $seed['failed_fetches'] + 1;
                 if ($failures >= SEED_FAILURE_THRESHOLD) {
-                    db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ?, active = 0 WHERE id = ?')
-                        ->execute([$failures, $seed['id']]);
-                    $errors[] = "seed {$seed['id']} ({$seed['url']}) fetch failed {$failures}x — auto-disabled (likely bot-protected or unreachable; re-enable in seeds.php to retry)";
+                    disable_seed_after_failure((int)$seed['id'], $failures);
+                    $cyclesNow = (int) db()->query('SELECT block_cycles FROM seed_urls WHERE id = ' . (int)$seed['id'])->fetchColumn();
+                    $permNote = $cyclesNow >= SEED_PERMANENT_DISABLE_CYCLES
+                        ? " — {$cyclesNow} consecutive block cycles, permanently disabled (re-enable in seeds.php to retry)"
+                        : " — auto-disabled, cycle {$cyclesNow}/" . SEED_PERMANENT_DISABLE_CYCLES . " (likely bot-protected or unreachable; retries automatically in " . SEED_COOLDOWN_HOURS . "h)";
+                    $errors[] = "seed {$seed['id']} ({$seed['url']}) fetch failed {$failures}x{$permNote}";
                 } else {
                     db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ? WHERE id = ?')
                         ->execute([$failures, $seed['id']]);
@@ -922,7 +953,7 @@ function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
                 continue;
             }
 
-            db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = 0, successful_fetches = successful_fetches + 1 WHERE id = ?')->execute([$seed['id']]);
+            db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = 0, successful_fetches = successful_fetches + 1, block_cycles = 0 WHERE id = ?')->execute([$seed['id']]);
 
             $links = extract_links($body, $seed['url']);
             // Filters against robots.txt for hosts we already have cached
@@ -998,8 +1029,7 @@ function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
             try {
                 $failures = (int) $seed['failed_fetches'] + 1;
                 if ($failures >= SEED_FAILURE_THRESHOLD) {
-                    db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ?, active = 0 WHERE id = ?')
-                        ->execute([$failures, $seed['id']]);
+                    disable_seed_after_failure((int)$seed['id'], $failures);
                 } else {
                     db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ? WHERE id = ?')
                         ->execute([$failures, $seed['id']]);

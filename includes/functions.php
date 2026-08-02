@@ -538,6 +538,21 @@ function all_contributing_sources(): array {
     return $rows;
 }
 
+/**
+ * Sites the crawler gave up on for good (see SEED_PERMANENT_DISABLE_CYCLES
+ * in harvester.php — 7 consecutive block cycles with zero successes
+ * between them). Shown publicly on Credits rather than just silently
+ * dropped: the crawler can't get in, but a human still can, so the link
+ * stays available for direct searching.
+ */
+function permanently_blocked_seeds(): array {
+    return db()->query(
+        "SELECT url, host, block_cycles FROM seed_urls
+         WHERE permanently_disabled = 1
+         ORDER BY host ASC"
+    )->fetchAll();
+}
+
 function all_tags_with_counts(string $contentType = 'research'): array {
     $stmt = db()->prepare(
         "SELECT t.id, t.name, t.slug, COUNT(i.id) AS item_count

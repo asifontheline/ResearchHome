@@ -3,6 +3,7 @@ require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
 
 $sources = all_contributing_sources();
+$blockedSeeds = permanently_blocked_seeds();
 
 $pageTitle = 'Credits';
 require __DIR__ . '/includes/header.php';
@@ -89,6 +90,22 @@ require __DIR__ . '/includes/header.php';
     </li>
   <?php endforeach; ?>
 </ol>
+
+<?php if ($blockedSeeds): ?>
+<hr class="section-divider">
+<h2>Couldn't be crawled automatically</h2>
+<p class="muted">
+  These sites consistently block automated requests — the crawler tried,
+  respected every "no," and gave up for good rather than trying to bypass
+  bot-protection. Still genuinely useful sources, just not ones this catalog
+  can pull from automatically. Search them directly instead:
+</p>
+<ul class="portal-links">
+  <?php foreach ($blockedSeeds as $b): ?>
+    <li><a href="<?= h($b['url']) ?>" target="_blank" rel="noopener noreferrer"><?= h($b['host']) ?></a></li>
+  <?php endforeach; ?>
+</ul>
+<?php endif; ?>
 
 <h2>Infrastructure</h2>
 <p class="muted">Built with PHP and MySQL. No tracking, no ads, no accounts beyond a single admin login for the person running this instance.</p>
