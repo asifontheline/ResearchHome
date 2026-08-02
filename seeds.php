@@ -114,7 +114,7 @@ require __DIR__ . '/includes/header.php';
 
 <h2>Active &amp; disabled seeds</h2>
 <table class="seed-table">
-  <thead><tr><th>URL</th><th>Subject</th><th>Active</th><th>Last crawled</th><th>Failed fetches</th><th></th></tr></thead>
+  <thead><tr><th>URL</th><th>Subject</th><th>Active</th><th>Last crawled</th><th>Successful fetches</th><th>Failed fetches</th><th></th></tr></thead>
   <tbody>
     <?php foreach ($active as $s): ?>
       <tr>
@@ -122,6 +122,7 @@ require __DIR__ . '/includes/header.php';
         <td><?= h(subject_label($s['subject_slug'])) ?></td>
         <td><?= $s['active'] ? 'yes' : 'no' ?></td>
         <td><?= h($s['last_crawled_at'] ?? 'never') ?></td>
+        <td><?= (int)$s['successful_fetches'] ?></td>
         <td><?= (int)$s['failed_fetches'] ?><?= (int)$s['failed_fetches'] >= 3 && !$s['active'] ? ' — auto-disabled' : '' ?></td>
         <td>
           <form method="post" class="inline-form">
@@ -138,7 +139,7 @@ require __DIR__ . '/includes/header.php';
       </tr>
     <?php endforeach; ?>
     <?php if (!$active): ?>
-      <tr><td colspan="6" class="muted">No seeds yet.</td></tr>
+      <tr><td colspan="7" class="muted">No seeds yet.</td></tr>
     <?php endif; ?>
   </tbody>
 </table>

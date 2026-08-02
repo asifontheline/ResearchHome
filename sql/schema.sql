@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS seed_urls (
     added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_crawled_at DATETIME DEFAULT NULL,
     failed_fetches TINYINT UNSIGNED NOT NULL DEFAULT 0, -- auto-disabled past SEED_FAILURE_THRESHOLD (harvester.php)
+    successful_fetches INT UNSIGNED NOT NULL DEFAULT 0, -- cumulative count, never resets (unlike failed_fetches, which resets to 0 on the next success)
     UNIQUE KEY uniq_url (url(255)),
     KEY idx_host (host),
     KEY idx_seed_group (seed_group)

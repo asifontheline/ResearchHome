@@ -922,7 +922,7 @@ function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
                 continue;
             }
 
-            db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = 0 WHERE id = ?')->execute([$seed['id']]);
+            db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = 0, successful_fetches = successful_fetches + 1 WHERE id = ?')->execute([$seed['id']]);
 
             $links = extract_links($body, $seed['url']);
             // Filters against robots.txt for hosts we already have cached
@@ -1168,6 +1168,33 @@ function check_links_batch(int $limit = 8, ?float $deadline = null): array {
 
 // ---- Orchestrator -------------------------------------------------------
 
+/**
+ * Several messages pushed into $errors are informational, not failures —
+ * a source correctly self-throttling ("called within the last hour"), a
+ * loop gracefully stopping at its time budget, a run declining to overlap
+ * a previous one. Confirmed on production: these made up 29 of 53 "errors"
+ * logged in one 8-hour window, none of them a real problem — just the
+ * per-source cooldown doing exactly what it's supposed to now that harvest
+ * runs 4x/hour instead of hourly. Still kept in `detail` (still useful
+ * context for what a run actually did), just not counted toward the
+ * numeric `errors` column that's meant to flag runs worth looking at.
+ */
+function count_real_errors(array $errors): int {
+    $noticePrefixes = [
+        'Skipped (called within the last hour)',
+        'Skipped: a previous harvest run',
+        'Skipped: a previous discovery run',
+        'Skipped: a harvest run already started',
+        'Stopped early: time budget exceeded',
+    ];
+    return count(array_filter($errors, function ($e) use ($noticePrefixes) {
+        foreach ($noticePrefixes as $prefix) {
+            if (str_starts_with($e, $prefix)) return false;
+        }
+        return true;
+    }));
+}
+
 // Must stay under the cron interval so a genuinely-stuck run's lock
 // self-heals before the next tick would otherwise be blocked forever. Cron
 // now fires every 15 minutes (was hourly) — shortened to match, so a
@@ -1307,7 +1334,7 @@ function run_content_harvest(): array {
          WHERE id = ?'
     )->execute([
         $itemsAdded, $linksDiscovered, $linksChecked, $itemsRemoved,
-        $newHostsDiscovered, count($errors) + $queueErrors, implode("\n", $errors), $logId,
+        $newHostsDiscovered, count_real_errors($errors) + $queueErrors, implode("\n", $errors), $logId,
     ]);
 
     return [
@@ -1358,7 +1385,7 @@ function run_source_discovery(): array {
     db()->prepare(
         'UPDATE harvest_log SET finished_at = NOW(), new_seeds_discovered = ?, errors = ?, detail = ? WHERE id = ?'
     )->execute([
-        $proposed, count($errors), implode("\n", $errors), $logId,
+        $proposed, count_real_errors($errors), implode("\n", $errors), $logId,
     ]);
 
     return [
