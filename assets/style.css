@@ -237,10 +237,19 @@ nav { display: flex; gap: 1rem; }
 .tags-overflow-link {
   display: block;
   margin-top: 0.5rem;
-  font-size: 0.8rem;
-  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--accent);
+  animation: tags-overflow-blink 1.6s ease-in-out infinite;
 }
-.tags-overflow-link:hover { color: var(--accent); }
+.tags-overflow-link:hover { animation: none; text-decoration: underline; }
+@keyframes tags-overflow-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tags-overflow-link { animation: none; }
+}
 
 .tags-page-header {
   display: flex;
