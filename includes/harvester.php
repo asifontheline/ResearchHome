@@ -1108,8 +1108,17 @@ function process_queue_batch(int $limit = 20, ?float $deadline = null): array {
                 continue;
             }
 
+            // Falls back to a plain-text slice of the page body when there's
+            // no og:description/description meta tag -- generic crawled
+            // pages frequently lack one, which otherwise starves
+            // classify_subjects() down to just the (short) title and was
+            // the main source of zero-tag items.
+            $classifyText = $meta['title'] . ' ' . ($meta['abstract'] ?? '');
+            if (trim((string) ($meta['abstract'] ?? '')) === '') {
+                $classifyText .= ' ' . extract_body_text($body);
+            }
             $subjects = array_filter([$row['subject_slug']]);
-            $subjects = array_unique(array_merge($subjects, classify_subjects($meta['title'] . ' ' . ($meta['abstract'] ?? ''))));
+            $subjects = array_unique(array_merge($subjects, classify_subjects($classifyText)));
 
             $id = insert_item_if_new([
                 'title' => $meta['title'], 'url' => $row['url'],
@@ -1196,6 +1205,118 @@ function check_links_batch(int $limit = 8, ?float $deadline = null): array {
     return ['checked' => $checked, 'removed' => $removed];
 }
 
+/**
+ * One-time backlog cleanup for items tagged before classify_subjects()
+ * switched to word-boundary matching (see includes/functions.php) --
+ * reconciles each item's taxonomy tags (subjects.php slugs only; arXiv
+ * categories, Crossref/OpenAlex subjects, and manually typed tags are left
+ * alone) against what the fixed matcher would assign today. Runs a slice
+ * per harvest via a persistent 'retag_cursor' setting (same cursor-in-
+ * settings shape as subject_cursor/seed_group_cursor) so the full backlog
+ * drains over several runs without a schema migration or a one-off admin
+ * click. Naturally becomes a fast no-op forever once the cursor reaches the
+ * end -- new items are already tagged correctly at insert time.
+ */
+function retag_backlog_batch(int $limit, ?float $deadline = null): array {
+    static $subjects = null;
+    if ($subjects === null) {
+        $subjects = require __DIR__ . '/subjects.php';
+    }
+    $taxonomySlugs = array_keys($subjects);
+
+    $cursor = (int) get_setting('retag_cursor', '0');
+    $maxId = (int) db()->query('SELECT MAX(id) FROM items')->fetchColumn();
+    if ($maxId === 0 || $cursor >= $maxId) {
+        return ['checked' => 0, 'retagged' => 0, 'done' => true];
+    }
+
+    $stmt = db()->prepare('SELECT id, title, abstract FROM items WHERE id > ? ORDER BY id ASC LIMIT ' . (int) $limit);
+    $stmt->execute([$cursor]);
+    $rows = $stmt->fetchAll();
+
+    $checked = 0;
+    $retagged = 0;
+    $lastId = $cursor;
+    foreach ($rows as $row) {
+        $lastId = (int) $row['id'];
+        if ($deadline !== null && time_budget_exceeded($deadline)) break;
+        $checked++;
+
+        $currentTags = get_item_tags($lastId);
+        $currentTaxonomyTags = array_values(array_filter(
+            $currentTags,
+            fn($t) => in_array($t['slug'], $taxonomySlugs, true)
+        ));
+        $newMatches = classify_subjects(trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? '')));
+
+        $changed = false;
+        foreach ($currentTaxonomyTags as $t) {
+            if (!in_array($t['slug'], $newMatches, true)) {
+                db()->prepare('DELETE FROM item_tags WHERE item_id = ? AND tag_id = ?')->execute([$lastId, $t['id']]);
+                $changed = true;
+            }
+        }
+        $currentTaxonomySlugs = array_column($currentTaxonomyTags, 'slug');
+        foreach (array_diff($newMatches, $currentTaxonomySlugs) as $slug) {
+            foreach (resolve_tag_ids($slug) as $tagId) {
+                db()->prepare('INSERT IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)')->execute([$lastId, $tagId]);
+            }
+            $changed = true;
+        }
+        if ($changed) $retagged++;
+    }
+    set_setting('retag_cursor', (string) $lastId);
+
+    return ['checked' => $checked, 'retagged' => $retagged, 'done' => $lastId >= $maxId];
+}
+
+/**
+ * Items with zero tags at all only reach that state via the generic seed
+ * crawler (every API harvest path always attaches at least the subject slug
+ * it was searching for) -- a seed with no subject_slug plus a page with no
+ * description meta tag leaves classify_subjects() nothing to match. This
+ * re-fetches each such item's URL, pulls a plain-text body snippet
+ * (extract_body_text()), and reclassifies against title+abstract+body.
+ * Own 'zero_tag_cursor' setting, same batched-background shape as
+ * retag_backlog_batch(); a small limit since this does live HTTP fetches
+ * (unlike the pure-DB retag pass).
+ */
+function classify_zero_tag_backlog(int $limit, ?float $deadline = null): array {
+    $cursor = (int) get_setting('zero_tag_cursor', '0');
+    $stmt = db()->prepare(
+        'SELECT i.id, i.title, i.url, i.abstract FROM items i
+         LEFT JOIN item_tags it ON it.item_id = i.id
+         WHERE i.id > ? AND it.item_id IS NULL
+         ORDER BY i.id ASC LIMIT ' . (int) $limit
+    );
+    $stmt->execute([$cursor]);
+    $rows = $stmt->fetchAll();
+
+    $checked = 0;
+    $tagged = 0;
+    $lastId = $cursor;
+    foreach ($rows as $row) {
+        $lastId = (int) $row['id'];
+        if ($deadline !== null && time_budget_exceeded($deadline)) break;
+        $checked++;
+
+        $text = trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? ''));
+        $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
+        if ($body) {
+            $text .= ' ' . extract_body_text($body);
+        }
+
+        $matches = classify_subjects($text);
+        if ($matches) {
+            set_item_tags($lastId, resolve_tag_ids(implode(',', $matches)));
+            $tagged++;
+        }
+    }
+    set_setting('zero_tag_cursor', (string) $lastId);
+
+    return ['checked' => $checked, 'tagged' => $tagged];
+}
+
 // ---- Orchestrator -------------------------------------------------------
 
 /**
@@ -1216,6 +1337,7 @@ function count_real_errors(array $errors): int {
         'Skipped: a previous discovery run',
         'Skipped: a harvest run already started',
         'Stopped early: time budget exceeded',
+        'Tag cleanup:',
     ];
     return count(array_filter($errors, function ($e) use ($noticePrefixes) {
         foreach ($noticePrefixes as $prefix) {
@@ -1344,6 +1466,17 @@ function run_content_harvest(): array {
         $linkCheck = check_links_batch(8, $deadline);
         $linksChecked = $linkCheck['checked'];
         $itemsRemoved = $linkCheck['removed'];
+
+        // Backlog cleanup, both purely additive to whatever time budget is
+        // left after the steps above -- see retag_backlog_batch() and
+        // classify_zero_tag_backlog() for why these run as background
+        // batches instead of a one-off admin action.
+        $retag = retag_backlog_batch(500, $deadline);
+        $zeroTag = classify_zero_tag_backlog(15, $deadline);
+        if ($retag['checked'] > 0 || $zeroTag['checked'] > 0) {
+            $errors[] = "Tag cleanup: reviewed {$retag['checked']} existing item(s), retagged {$retag['retagged']}; "
+                . "zero-tag scan checked {$zeroTag['checked']}, tagged {$zeroTag['tagged']}.";
+        }
 
         // Every new row in `hosts` since this run started is a domain the
         // crawler had never touched before — a concrete, honest measure of

@@ -1131,3 +1131,16 @@ function extract_generic_metadata(string $body, string $url): array {
         'image_url' => $get_meta('og:image'),
     ];
 }
+
+/**
+ * Plain-text snippet of a page's visible body, for classify_subjects() to
+ * search when there's no og:description/description meta tag to work with
+ * (common on generic crawled pages) -- not stored anywhere, just fed into
+ * the classifier as extra text to match keywords against.
+ */
+function extract_body_text(string $html, int $maxChars = 4000): string {
+    $html = preg_replace('#<(script|style)\b[^>]*>.*?</\1>#is', ' ', $html) ?? $html;
+    $text = html_entity_decode(strip_tags($html), ENT_QUOTES, 'UTF-8');
+    $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+    return mb_substr(trim($text), 0, $maxChars);
+}
