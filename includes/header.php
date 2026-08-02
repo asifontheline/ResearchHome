@@ -87,6 +87,19 @@ if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE
         <tr><td>Last harvest (UTC)</td><td><?= h(substr($summary['last_run']['started_at'], 5, 11)) ?></td></tr>
       <?php endif; ?>
     </table>
+    <?php
+      // Homepage-only milestone badge: every 1,000 items gets a little
+      // celebration next to the stat box. Recomputed on every load, so it
+      // always reflects the most recently crossed thousand, not a one-time
+      // event that needs tracking anywhere.
+      $milestoneK = intdiv($summary['total_items'], 1000);
+    ?>
+    <?php if (basename($_SERVER['SCRIPT_NAME']) === 'index.php' && $milestoneK >= 1): ?>
+      <div class="milestone-badge" aria-label="<?= $milestoneK ?>,000 articles cataloged">
+        <span class="milestone-blast" aria-hidden="true"></span>
+        <span class="milestone-text">&#127881; <?= $milestoneK ?>,000<br><small>articles</small></span>
+      </div>
+    <?php endif; ?>
     <nav>
       <a href="/index.php">Home</a>
       <a href="/activity.php">Activity</a>

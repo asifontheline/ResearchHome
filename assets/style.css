@@ -118,6 +118,41 @@ nav { display: flex; gap: 1rem; }
 .summary-box td:first-child { color: var(--muted); }
 .summary-box td:last-child { text-align: right; font-weight: 600; }
 
+/* Homepage-only "N,000 articles" milestone badge, next to the summary box —
+   see includes/header.php. The blast is a couple of expanding rings behind
+   the box, not a full confetti library — small and self-contained on
+   purpose ("small box" per the request that added this). */
+.milestone-badge {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 76px;
+  height: 44px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #ffb703, #ef476f);
+  color: #fff;
+  text-align: center;
+  line-height: 1.15;
+}
+.milestone-text { position: relative; z-index: 1; font-size: 0.72rem; font-weight: 700; }
+.milestone-text small { display: block; font-size: 0.6rem; font-weight: 500; opacity: 0.9; }
+.milestone-blast {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  box-shadow: 0 0 0 0 rgba(255, 183, 3, 0.65);
+  animation: milestone-blast 1.6s ease-out 2;
+  pointer-events: none;
+}
+@keyframes milestone-blast {
+  0% { box-shadow: 0 0 0 0 rgba(255, 183, 3, 0.65); }
+  100% { box-shadow: 0 0 0 14px rgba(255, 183, 3, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .milestone-blast { animation: none; }
+}
+
 .container { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
 .container.narrow { max-width: 420px; }
 
