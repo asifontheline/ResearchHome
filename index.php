@@ -17,16 +17,19 @@ if ($tagSlug !== '') {
     $params[] = $tagSlug;
 }
 
-// Tries each candidate (exact phrase, then all-words-required) against a
-// real COUNT query and stops at the first one that finds something --
-// see search_match_candidates() in functions.php for why this replaced a
-// flat OR-of-every-word query, which could match a document on nothing
-// but an ordinary single word shared with the query. Falls through to the
-// existing zero-result experience (harvester queue + external portals) if
-// no candidate finds anything, rather than surfacing a loose match.
+// Tries each candidate (exact phrase -> all-words-required -> any-word,
+// strictest first) against a real COUNT query and uses the first one that
+// finds something -- see search_match_candidates() in functions.php. The
+// broadest tier is a deliberate last resort, not dropped: showing today's
+// closest available match beats a bare "0 results" while the harvester
+// queue works on finding something better. $isLooseMatch flags when it
+// was that broadest tier, so the results page can say so instead of
+// presenting a loose match as if it were exact.
 $searchMatch = null;
+$isLooseMatch = false;
 if ($q !== '') {
-    foreach (search_match_candidates($q) as $candidate) {
+    $candidates = search_match_candidates($q);
+    foreach ($candidates as $candidate) {
         $testWhere = array_merge($where, ['MATCH(i.title, i.authors, i.abstract, i.notes) AGAINST (? IN BOOLEAN MODE)']);
         $testParams = array_merge($params, [$candidate]);
         $testWhereClause = ' WHERE ' . implode(' AND ', $testWhere);
@@ -34,6 +37,7 @@ if ($q !== '') {
         $stmt->execute($testParams);
         if ((int) $stmt->fetchColumn() > 0) {
             $searchMatch = $candidate;
+            $isLooseMatch = $candidate === end($candidates) && count($candidates) > 1;
             break;
         }
     }
@@ -41,9 +45,8 @@ if ($q !== '') {
         $where[] = 'MATCH(i.title, i.authors, i.abstract, i.notes) AGAINST (? IN BOOLEAN MODE)';
         $params[] = $searchMatch;
     } else {
-        // Nothing matched any candidate -- force the main query to find
-        // zero rows too (rather than silently falling back to an
-        // unfiltered/broad query) so the existing zero-result UI kicks in.
+        // Every candidate, including the broadest, found nothing -- a
+        // genuine zero, not just a strict-tier miss.
         $where[] = '1 = 0';
     }
 }
@@ -82,7 +85,7 @@ if ($q !== '') {
 // back to str_replace('-', ' ', $tagSlug), which is exactly how ~20 bare
 // arXiv category codes (e.g. "cs.DC" -> "cs dc") ended up queued as
 // harvest keywords in one day — meaningless noise, not real demand.
-if ($totalItems === 0) {
+if ($totalItems === 0 || $isLooseMatch) {
     if ($q !== '') {
         record_search_miss($q);
     } elseif ($tagSlug !== '') {
@@ -204,6 +207,13 @@ $tickerText = 'ResHub (Research Hub) automatically discovers and catalogs freely
       <?php if ($q): ?>Search: “<?= h($q) ?>”<?php endif; ?>
       <?php if ($tagSlug): ?> Tag: <?= h($tagSlug) ?><?php endif; ?>
       &middot; <a href="/index.php">clear</a>
+    </p>
+  <?php endif; ?>
+
+  <?php if ($isLooseMatch): ?>
+    <p class="muted loose-match-note">
+      No exact or all-words match for “<?= h($q) ?>” — showing the closest related items instead.
+      We've also queued this search for the harvester to try finding something more specific.
     </p>
   <?php endif; ?>
 

@@ -220,21 +220,22 @@ function record_search_log(string $q, int $resultCount): void {
 
 /**
  * Builds MySQL BOOLEAN MODE AGAINST() candidates for a query, strictest
- * first, so index.php can try each in turn and stop at the first one that
- * actually finds something -- rather than a flat OR of every word, which
- * let a single ordinary word (e.g. "elements" in "periodic table
- * elements") match a completely unrelated document just because boolean
- * mode's default is OR between terms. Relevance ranking alone doesn't fix
- * that: a weak one-word match still outranks nothing, and still shows up.
+ * first, so index.php can try each in turn and use the first one that
+ * actually finds something. A flat OR of every word let a single ordinary
+ * word (e.g. "elements" in "periodic table elements") match a completely
+ * unrelated document just because boolean mode's default is OR between
+ * terms -- so this prefers the closest interpretation available instead
+ * of jumping straight to the loosest one. But the loose OR tier is still
+ * the last resort, not dropped: coming back with nothing is worse than a
+ * loose-but-labeled-as-such match, since a genuine zero also queues a
+ * harvest search behind the scenes -- the visitor shouldn't have to wait
+ * for that when today's catalog already has *something* related.
  *
  *  1. The exact phrase (2+ words only) -- words together, in order.
  *  2. Every word required (each with a trailing wildcard, so a partial/
  *     prefix form still counts -- e.g. "chem" matches "chemistry").
- *
- * If neither finds anything, the caller falls through to the existing
- * zero-result experience (queue it for the harvester, show external
- * portal links) instead of surfacing a loose single-word match that's
- * likely irrelevant.
+ *  3. Any word at all (same wildcarding) -- the broadest tier, only used
+ *     when neither stricter tier finds anything.
  *
  * Boolean-mode operator characters in the raw query (+-<>()~*"@) are
  * stripped from each word first, so user input can't form its own (or a
@@ -254,8 +255,9 @@ function search_match_candidates(string $q): array {
     $candidates = [];
     if (count($words) > 1) {
         $candidates[] = '"' . implode(' ', $words) . '"';
+        $candidates[] = implode(' ', array_map(fn($w) => '+' . $w . '*', $words));
     }
-    $candidates[] = implode(' ', array_map(fn($w) => '+' . $w . '*', $words));
+    $candidates[] = implode(' ', array_map(fn($w) => $w . '*', $words));
     return $candidates;
 }
 
