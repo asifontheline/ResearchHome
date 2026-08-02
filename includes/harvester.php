@@ -1224,18 +1224,30 @@ function retag_backlog_batch(int $limit, ?float $deadline = null): array {
     }
     $taxonomySlugs = array_keys($subjects);
 
-    $cursor = (int) get_setting('retag_cursor', '0');
+    // 'retag_cursor_v2', not 'retag_cursor' -- the first version of this
+    // pass (cursor key 'retag_cursor') could strip an item's only tag
+    // (a false positive) and leave it with zero tags total, orphaned: this
+    // batch's own cursor had already moved past that id by the time it
+    // happened, and the separate classify_zero_tag_backlog() cursor moves
+    // ~30x slower (live HTTP fetches vs. pure DB), so it could never catch
+    // up before more items got orphaned than it fixed. Confirmed on
+    // production: zero-tag items went 379 -> 1032 rather than shrinking.
+    // The new key restarts the sweep from id 0 with the inline rescue
+    // below, which closes that gap at the source instead of depending on
+    // a second, slower pass to clean up after the first.
+    $cursor = (int) get_setting('retag_cursor_v2', '0');
     $maxId = (int) db()->query('SELECT MAX(id) FROM items')->fetchColumn();
     if ($maxId === 0 || $cursor >= $maxId) {
-        return ['checked' => 0, 'retagged' => 0, 'done' => true];
+        return ['checked' => 0, 'retagged' => 0, 'rescued' => 0, 'done' => true];
     }
 
-    $stmt = db()->prepare('SELECT id, title, abstract FROM items WHERE id > ? ORDER BY id ASC LIMIT ' . (int) $limit);
+    $stmt = db()->prepare('SELECT id, title, url, abstract FROM items WHERE id > ? ORDER BY id ASC LIMIT ' . (int) $limit);
     $stmt->execute([$cursor]);
     $rows = $stmt->fetchAll();
 
     $checked = 0;
     $retagged = 0;
+    $rescued = 0;
     $lastId = $cursor;
     foreach ($rows as $row) {
         $lastId = (int) $row['id'];
@@ -1247,6 +1259,7 @@ function retag_backlog_batch(int $limit, ?float $deadline = null): array {
             $currentTags,
             fn($t) => in_array($t['slug'], $taxonomySlugs, true)
         ));
+        $otherTagCount = count($currentTags) - count($currentTaxonomyTags);
         $newMatches = classify_subjects(trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? '')));
 
         $changed = false;
@@ -1264,10 +1277,28 @@ function retag_backlog_batch(int $limit, ?float $deadline = null): array {
             $changed = true;
         }
         if ($changed) $retagged++;
-    }
-    set_setting('retag_cursor', (string) $lastId);
 
-    return ['checked' => $checked, 'retagged' => $retagged, 'done' => $lastId >= $maxId];
+        // This item has zero tags of any kind (not just zero taxonomy tags)
+        // once the reconciliation above lands -- rescue it right here with
+        // the same body-text fetch classify_zero_tag_backlog() does, rather
+        // than leaving it for a background scan that moves far slower than
+        // this one and may never reach it.
+        if ($otherTagCount === 0 && !$newMatches) {
+            $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
+            if ($body) {
+                $rescueMatches = classify_subjects(
+                    trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? '')) . ' ' . extract_body_text($body)
+                );
+                if ($rescueMatches) {
+                    set_item_tags($lastId, resolve_tag_ids(implode(',', $rescueMatches)));
+                    $rescued++;
+                }
+            }
+        }
+    }
+    set_setting('retag_cursor_v2', (string) $lastId);
+
+    return ['checked' => $checked, 'retagged' => $retagged, 'rescued' => $rescued, 'done' => $lastId >= $maxId];
 }
 
 /**
@@ -1474,8 +1505,8 @@ function run_content_harvest(): array {
         $retag = retag_backlog_batch(500, $deadline);
         $zeroTag = classify_zero_tag_backlog(15, $deadline);
         if ($retag['checked'] > 0 || $zeroTag['checked'] > 0) {
-            $errors[] = "Tag cleanup: reviewed {$retag['checked']} existing item(s), retagged {$retag['retagged']}; "
-                . "zero-tag scan checked {$zeroTag['checked']}, tagged {$zeroTag['tagged']}.";
+            $errors[] = "Tag cleanup: reviewed {$retag['checked']} existing item(s), retagged {$retag['retagged']}, "
+                . "rescued {$retag['rescued']} newly-zero-tag; zero-tag scan checked {$zeroTag['checked']}, tagged {$zeroTag['tagged']}.";
         }
 
         // Every new row in `hosts` since this run started is a domain the

@@ -1,12 +1,13 @@
 <?php
-// One-off admin utility: re-run classify_subjects() against every existing
-// item's title+abstract and reconcile its taxonomy tags (subjects.php slugs
-// only -- arXiv categories, Crossref/OpenAlex subjects, and manually typed
-// tags are left untouched) against the current, word-boundary-matching
-// version of that function. Built to fix items mistagged by the old
-// substring-matching classify_subjects() (see includes/functions.php).
-// Delete this file once the cleanup pass is done -- it's not linked from
-// anywhere and isn't meant to stick around as a permanent feature.
+// Read-only diagnostic: reports what includes/harvester.php's
+// retag_backlog_batch() / classify_zero_tag_backlog() background jobs are
+// (still) finding, without writing anything itself. This used to have an
+// apply=1 write path, removed after it turned out to share a bug with the
+// first version of retag_backlog_batch(): removing an item's only
+// (wrong) tag with no rescue attempt can strand it at zero tags entirely,
+// and confirmed on production this outpaced the fix (zero-tag count went
+// 379 -> 1032). The background job now rescues those inline; this script
+// only ever reports numbers, it doesn't touch the database.
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
 require_login();
@@ -14,7 +15,7 @@ require_login();
 $subjects = require __DIR__ . '/includes/subjects.php';
 $taxonomySlugs = array_keys($subjects);
 
-$apply = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['apply'] ?? '') === '1';
+$apply = false;
 
 $items = db()->query('SELECT id, title, url, abstract, source_name FROM items')->fetchAll();
 $crawledUrls = array_flip(array_column(db()->query('SELECT url FROM crawl_queue')->fetchAll(), 'url'));
@@ -78,7 +79,7 @@ foreach ($items as $item) {
 }
 
 header('Content-Type: text/plain; charset=utf-8');
-echo $apply ? "APPLIED — changes written.\n\n" : "DRY RUN — nothing written. POST apply=1 to this URL to apply.\n\n";
+echo "READ-ONLY — this script never writes; the background harvest job (retag_backlog_batch / classify_zero_tag_backlog) does the actual work.\n\n";
 echo "Items scanned: " . count($items) . "\n\n";
 
 echo "Tag-count histogram (tags per item, all tags not just taxonomy):\n";
