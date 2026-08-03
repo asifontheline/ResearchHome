@@ -1282,18 +1282,16 @@ function retag_backlog_batch(int $limit, ?float $deadline = null): array {
         // once the reconciliation above lands -- rescue it right here with
         // the same body-text fetch classify_zero_tag_backlog() does, rather
         // than leaving it for a background scan that moves far slower than
-        // this one and may never reach it.
+        // this one and may never reach it. Falls back to 'general'
+        // (subjects.php) if even that finds nothing, so this item is
+        // closed out for good instead of staying zero-tagged.
         if ($otherTagCount === 0 && !$newMatches) {
             $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
-            if ($body) {
-                $rescueMatches = classify_subjects(
-                    trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? '')) . ' ' . extract_body_text($body)
-                );
-                if ($rescueMatches) {
-                    set_item_tags($lastId, resolve_tag_ids(implode(',', $rescueMatches)));
-                    $rescued++;
-                }
-            }
+            $rescueMatches = $body
+                ? classify_subjects(trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? '')) . ' ' . extract_body_text($body))
+                : [];
+            set_item_tags($lastId, resolve_tag_ids(implode(',', $rescueMatches ?: ['general'])));
+            $rescued++;
         }
     }
     set_setting('retag_cursor_v2', (string) $lastId);
@@ -1336,6 +1334,7 @@ function classify_zero_tag_backlog(int $limit, ?float $deadline = null): array {
 
     $checked = 0;
     $tagged = 0;
+    $fallback = 0;
     foreach ($rows as $row) {
         if ($deadline !== null && time_budget_exceeded($deadline)) break;
         $checked++;
@@ -1350,12 +1349,20 @@ function classify_zero_tag_backlog(int $limit, ?float $deadline = null): array {
         if ($matches) {
             set_item_tags((int) $row['id'], resolve_tag_ids(implode(',', $matches)));
             $tagged++;
+        } else {
+            // No keyword match even with body text, or the fetch itself
+            // failed (dead link, timeout) -- 'general' (subjects.php)
+            // closes this out for good rather than leaving it to be
+            // resampled by RAND() forever. It drops out of the zero-tag
+            // query below either way, same as a real match would.
+            set_item_tags((int) $row['id'], resolve_tag_ids('general'));
+            $fallback++;
         }
     }
 
     // No rows at all means the zero-tag set is genuinely empty right now --
     // the only honest "done" signal under random sampling.
-    return ['checked' => $checked, 'tagged' => $tagged, 'done' => count($rows) === 0];
+    return ['checked' => $checked, 'tagged' => $tagged, 'fallback' => $fallback, 'done' => count($rows) === 0];
 }
 
 // ---- Orchestrator -------------------------------------------------------
@@ -1516,7 +1523,8 @@ function run_content_harvest(): array {
         $zeroTag = classify_zero_tag_backlog(15, $deadline);
         if ($retag['checked'] > 0 || $zeroTag['checked'] > 0) {
             $errors[] = "Tag cleanup: reviewed {$retag['checked']} existing item(s), retagged {$retag['retagged']}, "
-                . "rescued {$retag['rescued']} newly-zero-tag; zero-tag scan checked {$zeroTag['checked']}, tagged {$zeroTag['tagged']}.";
+                . "rescued {$retag['rescued']} newly-zero-tag; zero-tag scan checked {$zeroTag['checked']}, "
+                . "tagged {$zeroTag['tagged']}, fell back to General for {$zeroTag['fallback']}.";
         }
 
         // Every new row in `hosts` since this run started is a domain the

@@ -717,9 +717,11 @@ function insert_item_if_new(array $fields, array $tagNames = []): ?int {
         throw new RuntimeException('insert_item_if_new: lastInsertId() returned 0 after a successful insert — refusing to write item_tags against an invalid id.');
     }
 
-    if ($tagNames) {
-        set_item_tags($itemId, resolve_tag_ids(implode(',', $tagNames)));
-    }
+    // 'general' (subjects.php) whenever nothing else applied -- no source
+    // category, no seed subject, no classify_subjects() keyword match.
+    // Guarantees no item is ever left with zero tags, regardless of which
+    // harvest path added it.
+    set_item_tags($itemId, resolve_tag_ids(implode(',', $tagNames ?: ['general'])));
 
     return $itemId;
 }

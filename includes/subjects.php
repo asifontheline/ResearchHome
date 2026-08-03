@@ -74,4 +74,12 @@ return [
 
     // Business
     'business' => ['label' => 'Business & Management', 'parent' => 'Business', 'keywords' => ['business management', 'organizational behavior', 'supply chain', 'marketing']],
+
+    // Fallback only -- deliberately empty keywords, so classify_subjects()
+    // never matches it via the normal keyword loop. insert_item_if_new()
+    // (functions.php) applies it directly whenever every other source
+    // (source-provided category, seed subject, keyword match) came back
+    // with nothing, so no item is ever left with zero tags. Exists here
+    // only so it has a real label/slug for display and browsing.
+    'general' => ['label' => 'General', 'parent' => 'General', 'keywords' => []],
 ];
