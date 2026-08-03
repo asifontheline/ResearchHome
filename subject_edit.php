@@ -4,10 +4,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_login();
 
 $slug = trim($_GET['slug'] ?? $_POST['slug'] ?? '');
-// SQL_NO_CACHE -- see get_subjects() in includes/functions.php for why:
-// confirmed on production that queries against `subjects` could return a
-// stale cached result.
-$stmt = db()->prepare('SELECT SQL_NO_CACHE * FROM subjects WHERE slug = ?');
+$stmt = db()->prepare('SELECT * FROM subjects WHERE slug = ?');
 $stmt->execute([$slug]);
 $subject = $stmt->fetch();
 
@@ -49,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $existingParents = array_values(array_unique(array_column(
-    db()->query('SELECT SQL_NO_CACHE DISTINCT parent FROM subjects ORDER BY parent ASC')->fetchAll(),
+    db()->query('SELECT DISTINCT parent FROM subjects ORDER BY parent ASC')->fetchAll(),
     'parent'
 )));
 

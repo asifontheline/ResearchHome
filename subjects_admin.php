@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$errors) {
             $slug = slugify($label);
-            $existing = db()->prepare('SELECT SQL_NO_CACHE id FROM subjects WHERE slug = ?');
+            $existing = db()->prepare('SELECT id FROM subjects WHERE slug = ?');
             $existing->execute([$slug]);
             if ($existing->fetch()) {
                 $errors[] = "A subject with slug \"{$slug}\" already exists — edit it instead of adding a duplicate.";
@@ -39,12 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// SQL_NO_CACHE -- see includes/functions.php's get_subjects() for why:
-// confirmed on production that a stale query-cache entry for this exact
-// query text kept returning an old row count long after the table had
-// far more rows, while other queries against the same table (different
-// text) were correctly fresh the whole time.
-$subjects = db()->query('SELECT SQL_NO_CACHE slug, label, parent, keywords FROM subjects ORDER BY parent ASC, label ASC')->fetchAll();
+$subjects = db()->query('SELECT slug, label, parent, keywords FROM subjects ORDER BY parent ASC, label ASC')->fetchAll();
 $existingParents = array_values(array_unique(array_column($subjects, 'parent')));
 sort($existingParents);
 

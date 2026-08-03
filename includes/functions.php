@@ -781,7 +781,7 @@ function ensure_subjects_table(): void {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
     );
 
-    $count = (int) db()->query('SELECT SQL_NO_CACHE COUNT(*) FROM subjects')->fetchColumn();
+    $count = (int) db()->query('SELECT COUNT(*) FROM subjects')->fetchColumn();
     if ($count === 0) {
         $seed = require __DIR__ . '/subjects.php';
         $stmt = db()->prepare('INSERT INTO subjects (slug, label, parent, keywords) VALUES (?, ?, ?, ?)');
@@ -812,14 +812,7 @@ function get_subjects(): array {
     ensure_subjects_table();
 
     $subjects = [];
-    // SQL_NO_CACHE: confirmed on production that a stale MySQL/MariaDB
-    // query-cache entry, keyed on this exact query text, kept returning an
-    // old 2-row result for a long stretch after the table had 85 rows --
-    // a different query (e.g. a plain COUNT(*)) against the same table
-    // returned the correct count the whole time. Explicitly disabling
-    // caching here is cheap (this only runs once per request either way,
-    // via the static cache above) and removes the whole failure class.
-    $rows = db()->query('SELECT SQL_NO_CACHE slug, label, parent, keywords FROM subjects ORDER BY id ASC')->fetchAll();
+    $rows = db()->query('SELECT slug, label, parent, keywords FROM subjects ORDER BY id ASC')->fetchAll();
     foreach ($rows as $row) {
         $subjects[$row['slug']] = [
             'label' => $row['label'],

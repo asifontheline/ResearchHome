@@ -61,9 +61,9 @@ if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE
     <input type="text" name="q" placeholder="Search title, authors, abstract, notes…" value="<?= h($_GET['q'] ?? '') ?>">
     <select name="tag" aria-label="Limit search to a subject">
       <option value="">All subjects</option>
-      <?php foreach ($headerGrouped['groups'] as $parent => $subjects): ?>
+      <?php foreach ($headerGrouped['groups'] as $parent => $groupSubjects): ?>
         <optgroup label="<?= h($parent) ?>">
-          <?php foreach ($subjects as $s): ?>
+          <?php foreach ($groupSubjects as $s): ?>
             <option value="<?= h($s['slug']) ?>" <?= $currentTagSlug === $s['slug'] ? 'selected' : '' ?>><?= h($s['label']) ?> (<?= (int)$s['count'] ?>)</option>
           <?php endforeach; ?>
         </optgroup>
