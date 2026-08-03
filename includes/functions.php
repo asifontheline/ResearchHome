@@ -743,11 +743,83 @@ function arxiv_category_label(string $code): string {
  * Match subject keywords against a blob of text (title + abstract) and
  * return the slugs of subjects whose keywords appear.
  */
-function classify_subjects(string $text): array {
-    static $subjects = null;
-    if ($subjects === null) {
-        $subjects = require __DIR__ . '/subjects.php';
+/**
+ * Creates the `subjects` table and seeds it from includes/subjects.php on
+ * first use -- once per deploy, not once per request (guarded by a
+ * 'subjects_migrated' setting, checked before touching the DB at all).
+ *
+ * Why a DB table instead of just editing the static file: this app's
+ * deploy replaces every tracked file on every `git push` (see
+ * .github/workflows/deploy.yml), the same reason config.php is excluded
+ * from deploy rather than editable at runtime. A subject an admin adds via
+ * subjects_admin.php would get silently wiped by the next deploy if it
+ * only lived in a file. DB storage survives deploys the same way items/
+ * tags/seeds already do.
+ */
+function ensure_subjects_table(): void {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+
+    if (get_setting('subjects_migrated', '') === '1') {
+        return;
     }
+
+    db()->exec(
+        'CREATE TABLE IF NOT EXISTS subjects (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            slug VARCHAR(64) NOT NULL UNIQUE,
+            label VARCHAR(128) NOT NULL,
+            parent VARCHAR(128) NOT NULL,
+            keywords TEXT NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+    );
+
+    $count = (int) db()->query('SELECT COUNT(*) FROM subjects')->fetchColumn();
+    if ($count === 0) {
+        $seed = require __DIR__ . '/subjects.php';
+        $stmt = db()->prepare('INSERT INTO subjects (slug, label, parent, keywords) VALUES (?, ?, ?, ?)');
+        foreach ($seed as $slug => $def) {
+            $stmt->execute([$slug, $def['label'], $def['parent'], implode(',', $def['keywords'])]);
+        }
+    }
+
+    set_setting('subjects_migrated', '1');
+}
+
+/**
+ * Live subject taxonomy from the DB, same shape the old static
+ * includes/subjects.php array had (['slug' => ['label'=>, 'parent'=>,
+ * 'keywords'=>[...]]]) so every existing caller (classify_subjects(),
+ * get_grouped_subjects(), subject_label(), the seed/search/add forms)
+ * works unchanged. Cached per-request via the static var -- this is
+ * called from inside tight loops (classify_subjects() runs it, and that
+ * runs per item during a harvest batch), a fresh DB round-trip every call
+ * would be wasteful.
+ */
+function get_subjects(): array {
+    static $subjects = null;
+    if ($subjects !== null) {
+        return $subjects;
+    }
+
+    ensure_subjects_table();
+
+    $subjects = [];
+    $rows = db()->query('SELECT slug, label, parent, keywords FROM subjects ORDER BY id ASC')->fetchAll();
+    foreach ($rows as $row) {
+        $subjects[$row['slug']] = [
+            'label' => $row['label'],
+            'parent' => $row['parent'],
+            'keywords' => array_values(array_filter(array_map('trim', explode(',', $row['keywords'])))),
+        ];
+    }
+    return $subjects;
+}
+
+function classify_subjects(string $text): array {
+    $subjects = get_subjects();
     $text = mb_strtolower($text);
     $matches = [];
     foreach ($subjects as $slug => $def) {
@@ -769,11 +841,7 @@ function classify_subjects(string $text): array {
 
 function subject_label(?string $slug): string {
     if ($slug === null) return 'General';
-    static $subjects = null;
-    if ($subjects === null) {
-        $subjects = require __DIR__ . '/subjects.php';
-    }
-    return $subjects[$slug]['label'] ?? $slug;
+    return get_subjects()[$slug]['label'] ?? $slug;
 }
 
 /**
@@ -800,7 +868,7 @@ const OTHER_TAG_PROMOTION_THRESHOLD = 2;
 const SPECIALIZED_TOPICS_SHOWN = 2;
 
 function get_grouped_subjects(string $contentType = 'research'): array {
-    $subjects = require __DIR__ . '/subjects.php';
+    $subjects = get_subjects();
     $tagCounts = all_tags_with_counts($contentType);
     $counts = [];
     foreach ($tagCounts as $t) {

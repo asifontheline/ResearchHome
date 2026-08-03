@@ -48,6 +48,23 @@ CREATE TABLE IF NOT EXISTS item_tags (
     FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Curated subject taxonomy (browse sidebar + classify_subjects() keyword
+-- matching) -- was a static includes/subjects.php array; moved to the DB
+-- so admin-added subjects (subjects.php the admin page) actually persist.
+-- A static file would get silently overwritten by the next `git push`
+-- deploy (FTP-Deploy-Action replaces every tracked file), the same reason
+-- config.php is excluded from deploy instead of writable at runtime.
+-- Self-migrates and self-seeds from the original curated list on first
+-- use -- see ensure_subjects_table() in functions.php.
+CREATE TABLE IF NOT EXISTS subjects (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    slug VARCHAR(64) NOT NULL UNIQUE,
+    label VARCHAR(128) NOT NULL,
+    parent VARCHAR(128) NOT NULL,
+    keywords TEXT NOT NULL,   -- comma-separated, same shape resolve_tag_ids() already expects elsewhere; TEXT can't have a DEFAULT in strict MySQL
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- ---- Crawler / harvester ---------------------------------------------
 
 -- Small key-value store for harvester state (e.g. which subject to resume from).

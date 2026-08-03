@@ -89,7 +89,7 @@ if ($totalItems === 0 || $isLooseMatch) {
     if ($q !== '') {
         record_search_miss($q);
     } elseif ($tagSlug !== '') {
-        $subjectDefs = require __DIR__ . '/includes/subjects.php';
+        $subjectDefs = get_subjects();
         if (isset($subjectDefs[$tagSlug])) {
             record_search_miss($subjectDefs[$tagSlug]['keywords'][0]);
         } else {

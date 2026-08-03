@@ -46,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$subjects = require __DIR__ . '/includes/subjects.php';
+$subjects = get_subjects();
 
 $pageTitle = 'Add item';
 require __DIR__ . '/includes/header.php';

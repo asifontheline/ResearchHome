@@ -149,6 +149,7 @@ if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE
       <?php if (current_user()): ?>
         <a href="/harvest_log.php">Harvest log</a>
         <a href="/seeds.php">Seeds</a>
+        <a href="/subjects_admin.php">Subjects</a>
         <a href="/add.php">+ Add</a>
         <a href="/logout.php">Log out</a>
       <?php endif; ?>

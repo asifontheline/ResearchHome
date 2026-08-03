@@ -1218,11 +1218,7 @@ function check_links_batch(int $limit = 8, ?float $deadline = null): array {
  * end -- new items are already tagged correctly at insert time.
  */
 function retag_backlog_batch(int $limit, ?float $deadline = null): array {
-    static $subjects = null;
-    if ($subjects === null) {
-        $subjects = require __DIR__ . '/subjects.php';
-    }
-    $taxonomySlugs = array_keys($subjects);
+    $taxonomySlugs = array_keys(get_subjects());
 
     // 'retag_cursor_v2', not 'retag_cursor' -- the first version of this
     // pass (cursor key 'retag_cursor') could strip an item's only tag
@@ -1445,7 +1441,7 @@ function run_content_harvest(): array {
     }
 
     $deadline = microtime(true) + HARVEST_MAX_RUNTIME_MINUTES * 60;
-    $subjects = require __DIR__ . '/subjects.php';
+    $subjects = get_subjects();
     $logPdo = db();
     $logPdo->prepare("INSERT INTO harvest_log (started_at, run_type) VALUES (NOW(), 'harvest')")->execute();
     $logId = (int) $logPdo->lastInsertId();
