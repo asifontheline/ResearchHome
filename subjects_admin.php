@@ -47,6 +47,14 @@ $pageTitle = 'Subjects';
 require __DIR__ . '/includes/header.php';
 ?>
 
+<p style="background:#ff0;color:#000;padding:1rem;font-family:monospace;">
+  DIAGNOSTIC (remove after use) --
+  DB_NAME=<?= h(DB_NAME) ?> |
+  fresh-connection COUNT(*)=<?= (int) db(true)->query('SELECT COUNT(*) FROM subjects')->fetchColumn() ?> |
+  server time=<?= h(date('Y-m-d H:i:s')) ?> UTC |
+  file mtime=<?= h(date('Y-m-d H:i:s', filemtime(__FILE__))) ?> UTC
+</p>
+
 <h1>Subjects</h1>
 <p class="muted">
   The curated taxonomy driving the browse sidebar and <code>classify_subjects()</code>
