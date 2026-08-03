@@ -58,6 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $existingTags = array_map(fn($t) => $t['name'], get_item_tags($id));
 $tagsCsv = $_POST['tags'] ?? implode(', ', $existingTags);
+$existingTagNames = all_tag_names();
 
 $pageTitle = 'Edit item';
 require __DIR__ . '/includes/header.php';
@@ -104,8 +105,11 @@ require __DIR__ . '/includes/header.php';
     <textarea name="notes" rows="4"><?= h($item['notes']) ?></textarea>
   </label>
 
-  <label>Tags <span class="muted">(comma separated)</span>
-    <input type="text" name="tags" value="<?= h($tagsCsv) ?>">
+  <label>Tags <span class="muted">(comma separated; suggestions are existing tags, to avoid near-duplicates)</span>
+    <input type="text" name="tags" list="existing-tags" value="<?= h($tagsCsv) ?>">
+    <datalist id="existing-tags">
+      <?php foreach ($existingTagNames as $t): ?><option value="<?= h($t) ?>"><?php endforeach; ?>
+    </datalist>
   </label>
 
   <button type="submit">Save changes</button>

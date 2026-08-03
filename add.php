@@ -47,6 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $subjects = get_subjects();
+$existingTagNames = all_tag_names();
 
 $pageTitle = 'Add item';
 require __DIR__ . '/includes/header.php';
@@ -95,8 +96,11 @@ require __DIR__ . '/includes/header.php';
     <textarea name="notes" rows="4"><?= h($_POST['notes'] ?? '') ?></textarea>
   </label>
 
-  <label>Tags <span class="muted">(comma separated — type and topic both go here, e.g. "paper, patent, ai, biology")</span>
-    <input type="text" name="tags" value="<?= h($_POST['tags'] ?? '') ?>">
+  <label>Tags <span class="muted">(comma separated — type and topic both go here, e.g. "paper, patent, ai, biology"; suggestions are existing tags, to avoid near-duplicates)</span>
+    <input type="text" name="tags" list="existing-tags" value="<?= h($_POST['tags'] ?? '') ?>">
+    <datalist id="existing-tags">
+      <?php foreach ($existingTagNames as $t): ?><option value="<?= h($t) ?>"><?php endforeach; ?>
+    </datalist>
   </label>
 
   <label class="checkbox-label">

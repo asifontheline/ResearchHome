@@ -63,7 +63,10 @@ require __DIR__ . '/includes/header.php';
 <form method="post" class="item-form">
   <input type="hidden" name="action" value="add">
   <label>Label
-    <input type="text" name="label" required placeholder="e.g. Veterinary Science">
+    <input type="text" name="label" required list="existing-labels" placeholder="e.g. Veterinary Science">
+    <datalist id="existing-labels">
+      <?php foreach ($subjects as $s): ?><option value="<?= h($s['label']) ?>"><?php endforeach; ?>
+    </datalist>
   </label>
   <label>Parent group <span class="muted">(existing groups: <?= h(implode(', ', $existingParents)) ?>)</span>
     <input type="text" name="parent" required list="existing-parents" placeholder="e.g. Life Sciences & Medicine">

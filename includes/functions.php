@@ -596,6 +596,11 @@ function permanently_blocked_seeds(): array {
     )->fetchAll();
 }
 
+/** Every existing tag name, for datalist autocomplete on free-text tag inputs (add.php, edit.php). */
+function all_tag_names(): array {
+    return array_column(db()->query('SELECT name FROM tags ORDER BY name ASC')->fetchAll(), 'name');
+}
+
 function all_tags_with_counts(string $contentType = 'research'): array {
     $stmt = db()->prepare(
         "SELECT t.id, t.name, t.slug, COUNT(i.id) AS item_count
