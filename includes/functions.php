@@ -374,9 +374,12 @@ function render_world_map(array $points, string $domId): string {
     foreach ($points as $p) {
         if ($p['lat'] === null || $p['lon'] === null) continue;
         [$x, $y] = latlon_to_map_xy((float)$p['lat'], (float)$p['lon']);
-        // sqrt scaling: area (not radius) proportional to views, so one
-        // outlier city doesn't visually swallow the rest of the map.
-        $r = 2.5 + 7 * sqrt($p['views'] / $maxViews);
+        // Log scaling -- was sqrt, still let one location's dot visually
+        // dominate the map when its view count was far above everywhere
+        // else (a 10-100x gap only shrinks to ~3-10x under sqrt). Log
+        // compresses that gap much further while still keeping every dot
+        // strictly ordered by view count.
+        $r = 2.5 + 6 * log($p['views'] + 1) / log($maxViews + 1);
         $label = trim(($p['city'] ?? '') . ', ' . ($p['country'] ?? ''), ', ');
         $tip = sprintf('%s: %d view%s', $label ?: 'Unknown', (int)$p['views'], (int)$p['views'] === 1 ? '' : 's');
         // data-tip drives a custom JS tooltip below — native SVG <title>
