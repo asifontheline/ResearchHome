@@ -76,6 +76,9 @@ define('HARVEST_USER_AGENT', HARVEST_USER_AGENT_BASE . (defined('CONTACT_EMAIL')
  * load by more than a beat — on any failure this just returns null and the
  * page view is still recorded without a location. The IP passed in is
  * never persisted by the caller; only the resolved names are stored.
+ * Was 2s; bumped to 3s to catch more genuinely-slow-but-successful lookups
+ * (this only runs once per visitor per day, via geo_cache, so the extra
+ * second of worst-case latency is rare and cheap).
  */
 function geolocate_ip(string $ip): ?array {
     if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
@@ -84,7 +87,7 @@ function geolocate_ip(string $ip): ?array {
     $ch = curl_init("http://ip-api.com/json/{$ip}?fields=status,country,regionName,city,lat,lon");
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 2,
+        CURLOPT_TIMEOUT => 3,
         CURLOPT_USERAGENT => 'ResHub/1.0',
     ]);
     $body = curl_exec($ch);
