@@ -38,7 +38,7 @@ if ($replyTo !== '' && !filter_var($replyTo, FILTER_VALIDATE_EMAIL)) {
 $page = parse_url($_SERVER['HTTP_REFERER'] ?? '', PHP_URL_PATH) ?: 'unknown page';
 $body = "Page: {$page}\n" . ($replyTo !== '' ? "Reply-to: {$replyTo}\n" : "(no reply address given)\n") . "\n{$message}\n";
 
-$sent = send_email(FEEDBACK_EMAIL, '[Widget Feedback] New message from reshub.in', $body, $replyTo ?: null);
+$sent = send_email(FEEDBACK_EMAIL, '[fdbk] New message from reshub.in', $body, $replyTo ?: null);
 
 if (!$sent) {
     http_response_code(500);

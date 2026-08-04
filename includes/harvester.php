@@ -1922,7 +1922,7 @@ function process_feedback_emails(): array {
         // plain email -- it didn't come from a human writing one, so it
         // shouldn't also become a GitHub issue via this poller. Mark seen
         // and move on without creating anything.
-        if (str_starts_with($subject, '[Widget Feedback]')) {
+        if (str_starts_with($subject, '[fdbk]')) {
             imap_setflag_full($conn, (string)$num, '\\Seen');
             continue;
         }
