@@ -325,22 +325,24 @@ function get_traffic_summary(): array {
 }
 
 /**
- * Visit counts grouped by rounded lat/lon (1 decimal, ~11km) so nearby
- * visitors within the same city collapse into one dot instead of a
- * scatter of overlapping points at the same city center. $window is
- * 'today' or 'all'.
+ * Visit counts grouped by rounded lat/lon (2 decimals, ~1.1km -- was 1
+ * decimal/~11km, widened per feedback that too many distinct visitors were
+ * merging into too few dots) so exact-duplicate coordinates (the geo API
+ * only gives city-level precision to begin with, so same-city visitors
+ * often share identical lat/lon already) still collapse into one dot, but
+ * nearby-yet-different cities no longer do. $window is 'today' or 'all'.
  */
 function get_traffic_map_points(string $window): array {
     $since = $window === 'today' ? "WHERE pv.viewed_at >= CURDATE()" : '';
     return db()->query(
-        "SELECT ROUND(g.lat, 1) AS lat, ROUND(g.lon, 1) AS lon,
+        "SELECT ROUND(g.lat, 2) AS lat, ROUND(g.lon, 2) AS lon,
                 MAX(g.city) AS city, MAX(g.country) AS country,
                 COUNT(*) AS views, COUNT(DISTINCT pv.visitor_hash) AS unique_visitors
          FROM page_views pv
          JOIN geo_cache g ON g.visitor_hash = pv.visitor_hash
          {$since}
          " . ($window === 'today' ? 'AND' : 'WHERE') . " g.lat IS NOT NULL AND g.lon IS NOT NULL
-         GROUP BY ROUND(g.lat, 1), ROUND(g.lon, 1)
+         GROUP BY ROUND(g.lat, 2), ROUND(g.lon, 2)
          ORDER BY views DESC"
     )->fetchAll();
 }
