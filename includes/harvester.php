@@ -1424,6 +1424,58 @@ function reclassify_general_backlog(int $limit, ?float $deadline = null): array 
     return ['checked' => $checked, 'upgraded' => $upgraded];
 }
 
+/**
+ * Backfill for items.language on items added before language detection
+ * existed (see ensure_items_language_column() in functions.php) -- same
+ * "keep trying, don't just label it and move on" principle as
+ * reclassify_general_backlog().
+ *
+ * NULL vs '' matters here: NULL means "never checked yet", '' means
+ * "checked, genuinely couldn't determine" (fetch failed, no lang
+ * attribute or og:locale). Only NULL rows are selected, so a '' result
+ * drops out of the random-sample pool same as a real detection would --
+ * without that distinction this would refetch the same permanently-
+ * undetectable pages forever, same FIFO-starvation class of bug fixed
+ * earlier in classify_zero_tag_backlog().
+ *
+ * arXiv/USPTO skip the fetch entirely and reuse the same assumption
+ * applied at insert time (near-universally English in practice) --
+ * cheap and avoids ~1,000+ needless re-fetches of sources where the
+ * answer is already known with high confidence.
+ */
+function backfill_language_batch(int $limit, ?float $deadline = null): array {
+    $stmt = db()->prepare(
+        'SELECT id, url, source_name FROM items WHERE language IS NULL ORDER BY RAND() LIMIT ' . (int) $limit
+    );
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+
+    $checked = 0;
+    $detected = 0;
+    foreach ($rows as $row) {
+        if ($deadline !== null && time_budget_exceeded($deadline)) break;
+        $checked++;
+        $itemId = (int) $row['id'];
+
+        $source = mb_strtolower(trim((string) $row['source_name']));
+        if ($source === 'arxiv' || $source === 'uspto') {
+            db()->prepare('UPDATE items SET language = ? WHERE id = ?')->execute(['en', $itemId]);
+            $detected++;
+            continue;
+        }
+
+        $language = '';
+        $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
+        if ($body) {
+            $language = extract_generic_metadata($body, $row['url'])['language'] ?? '';
+        }
+        db()->prepare('UPDATE items SET language = ? WHERE id = ?')->execute([$language, $itemId]);
+        if ($language !== '') $detected++;
+    }
+
+    return ['checked' => $checked, 'detected' => $detected];
+}
+
 // ---- Orchestrator -------------------------------------------------------
 
 /**
@@ -1581,11 +1633,13 @@ function run_content_harvest(): array {
         $retag = retag_backlog_batch(500, $deadline);
         $zeroTag = classify_zero_tag_backlog(15, $deadline);
         $general = reclassify_general_backlog(15, $deadline);
-        if ($retag['checked'] > 0 || $zeroTag['checked'] > 0 || $general['checked'] > 0) {
+        $language = backfill_language_batch(15, $deadline);
+        if ($retag['checked'] > 0 || $zeroTag['checked'] > 0 || $general['checked'] > 0 || $language['checked'] > 0) {
             $errors[] = "Tag cleanup: reviewed {$retag['checked']} existing item(s), retagged {$retag['retagged']}, "
                 . "rescued {$retag['rescued']} newly-zero-tag; zero-tag scan checked {$zeroTag['checked']}, "
                 . "tagged {$zeroTag['tagged']}, fell back to General for {$zeroTag['fallback']}; "
-                . "General-reclassify checked {$general['checked']}, upgraded {$general['upgraded']}.";
+                . "General-reclassify checked {$general['checked']}, upgraded {$general['upgraded']}; "
+                . "language backfill checked {$language['checked']}, detected {$language['detected']}.";
         }
 
         // Every new row in `hosts` since this run started is a domain the
