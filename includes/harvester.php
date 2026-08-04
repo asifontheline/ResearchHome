@@ -1361,6 +1361,64 @@ function classify_zero_tag_backlog(int $limit, ?float $deadline = null): array {
     return ['checked' => $checked, 'tagged' => $tagged, 'fallback' => $fallback, 'done' => count($rows) === 0];
 }
 
+/**
+ * 'general' is a fallback, not a resting state -- without something that
+ * keeps trying to upgrade it, it's just "zero tags" wearing a label
+ * (fair criticism, worth taking seriously). This retries classification
+ * for items currently stuck on 'general', which can succeed now even
+ * when it failed before for two independent reasons: the taxonomy grows
+ * over time (subjects_admin.php lets an admin add new subjects any time,
+ * and the seed list itself went 26 -> 85 subjects in one pass), and this
+ * re-fetches the page fresh in case the original attempt hit a transient
+ * failure rather than genuinely unclassifiable content.
+ *
+ * Random-sampled, not a cursor -- same FIFO-starvation reasoning as
+ * classify_zero_tag_backlog(): an item that upgrades simply stops
+ * matching this query, no bookkeeping needed, and nothing can get stuck
+ * behind a stale pointer. Safe to keep running indefinitely as the
+ * taxonomy keeps growing, unlike a one-shot cursor sweep that would need
+ * manually restarting (a new cursor key) every time the taxonomy changes.
+ */
+function reclassify_general_backlog(int $limit, ?float $deadline = null): array {
+    $stmt = db()->prepare(
+        "SELECT i.id, i.title, i.url, i.abstract FROM items i
+         JOIN item_tags it ON it.item_id = i.id
+         JOIN tags t ON t.id = it.tag_id
+         WHERE t.slug = 'general'
+         ORDER BY RAND() LIMIT " . (int) $limit
+    );
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+
+    $checked = 0;
+    $upgraded = 0;
+    foreach ($rows as $row) {
+        if ($deadline !== null && time_budget_exceeded($deadline)) break;
+        $checked++;
+
+        $text = trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? ''));
+        $matches = classify_subjects($text);
+        if (!$matches) {
+            $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
+            if ($body) {
+                $matches = classify_subjects($text . ' ' . extract_body_text($body));
+            }
+        }
+
+        if ($matches) {
+            $itemId = (int) $row['id'];
+            $keepNames = array_map(
+                fn($t) => $t['name'],
+                array_filter(get_item_tags($itemId), fn($t) => $t['slug'] !== 'general')
+            );
+            set_item_tags($itemId, resolve_tag_ids(implode(',', array_merge($keepNames, $matches))));
+            $upgraded++;
+        }
+    }
+
+    return ['checked' => $checked, 'upgraded' => $upgraded];
+}
+
 // ---- Orchestrator -------------------------------------------------------
 
 /**
@@ -1517,10 +1575,12 @@ function run_content_harvest(): array {
         // batches instead of a one-off admin action.
         $retag = retag_backlog_batch(500, $deadline);
         $zeroTag = classify_zero_tag_backlog(15, $deadline);
-        if ($retag['checked'] > 0 || $zeroTag['checked'] > 0) {
+        $general = reclassify_general_backlog(15, $deadline);
+        if ($retag['checked'] > 0 || $zeroTag['checked'] > 0 || $general['checked'] > 0) {
             $errors[] = "Tag cleanup: reviewed {$retag['checked']} existing item(s), retagged {$retag['retagged']}, "
                 . "rescued {$retag['rescued']} newly-zero-tag; zero-tag scan checked {$zeroTag['checked']}, "
-                . "tagged {$zeroTag['tagged']}, fell back to General for {$zeroTag['fallback']}.";
+                . "tagged {$zeroTag['tagged']}, fell back to General for {$zeroTag['fallback']}; "
+                . "General-reclassify checked {$general['checked']}, upgraded {$general['upgraded']}.";
         }
 
         // Every new row in `hosts` since this run started is a domain the
