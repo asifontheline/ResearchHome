@@ -1206,7 +1206,7 @@ function check_links_batch(int $limit = 8, ?float $deadline = null): array {
         // immediately" special case for those two codes was removed.
         $failures = (int)$row['failed_checks'] + 1;
         if ($failures >= LINK_FAILURE_THRESHOLD) {
-            db()->prepare('DELETE FROM items WHERE id = ?')->execute([$row['id']]);
+            delete_item((int) $row['id']);
             $removed++;
         } else {
             db()->prepare('UPDATE items SET last_checked_at = NOW(), failed_checks = ? WHERE id = ?')
@@ -1271,11 +1271,16 @@ function retag_backlog_batch(int $limit, ?float $deadline = null): array {
         $newMatches = classify_subjects(trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? '')));
 
         $changed = false;
+        $removedTagIds = [];
         foreach ($currentTaxonomyTags as $t) {
             if (!in_array($t['slug'], $newMatches, true)) {
                 db()->prepare('DELETE FROM item_tags WHERE item_id = ? AND tag_id = ?')->execute([$lastId, $t['id']]);
+                $removedTagIds[] = $t['id'];
                 $changed = true;
             }
+        }
+        if ($removedTagIds) {
+            prune_orphaned_tags($removedTagIds);
         }
         $currentTaxonomySlugs = array_column($currentTaxonomyTags, 'slug');
         foreach (array_diff($newMatches, $currentTaxonomySlugs) as $slug) {

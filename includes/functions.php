@@ -553,12 +553,63 @@ function resolve_tag_ids(string $tagsCsv): array {
     return array_unique($ids);
 }
 
+/**
+ * Deletes any of the given tag ids that no longer have any item associated
+ * with them -- the counterpart to every place an item-tag association gets
+ * removed (an item deleted, a tag reconciled away, a typo corrected).
+ * Without this, `tags` rows never get cleaned up on their own (there was
+ * no code path that ever did), and orphaned 0-item tags accumulate
+ * silently and show up in tags.php right alongside real ones.
+ *
+ * Scoped to specific candidate ids (not a blanket "check every tag in the
+ * table" sweep) so this stays cheap enough to call immediately, every
+ * time, right at the point of removal -- not deferred to a periodic
+ * batch job that would leave orphans sitting around in the meantime.
+ */
+function prune_orphaned_tags(array $tagIds): int {
+    $tagIds = array_values(array_unique(array_filter(array_map('intval', $tagIds))));
+    if (!$tagIds) return 0;
+    $placeholders = implode(',', array_fill(0, count($tagIds), '?'));
+    $stmt = db()->prepare(
+        "DELETE FROM tags WHERE id IN ({$placeholders})
+         AND id NOT IN (SELECT DISTINCT tag_id FROM item_tags)"
+    );
+    $stmt->execute($tagIds);
+    return $stmt->rowCount();
+}
+
 function set_item_tags(int $itemId, array $tagIds): void {
     $pdo = db();
+    $oldStmt = $pdo->prepare('SELECT tag_id FROM item_tags WHERE item_id = ?');
+    $oldStmt->execute([$itemId]);
+    $oldTagIds = array_column($oldStmt->fetchAll(), 'tag_id');
+
     $pdo->prepare('DELETE FROM item_tags WHERE item_id = ?')->execute([$itemId]);
     $stmt = $pdo->prepare('INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?)');
     foreach ($tagIds as $tagId) {
         $stmt->execute([$itemId, $tagId]);
+    }
+
+    // Only tags this item dropped can possibly have been orphaned by this
+    // call -- ones it kept or newly gained obviously still have >=1 item.
+    $dropped = array_diff($oldTagIds, $tagIds);
+    if ($dropped) {
+        prune_orphaned_tags($dropped);
+    }
+}
+
+/**
+ * Deletes an item and prunes any of its tags that are now orphaned as a
+ * result -- item_tags rows cascade automatically via the FK, but that
+ * alone never removes the `tags` row itself. Every item-deletion call
+ * site should go through this instead of a bare `DELETE FROM items`, or
+ * a tag whose only item just got removed sits around as an orphan forever.
+ */
+function delete_item(int $itemId): void {
+    $tagIds = array_column(get_item_tags($itemId), 'id');
+    db()->prepare('DELETE FROM items WHERE id = ?')->execute([$itemId]);
+    if ($tagIds) {
+        prune_orphaned_tags($tagIds);
     }
 }
 

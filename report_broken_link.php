@@ -21,7 +21,7 @@ if ($item) {
     $code = check_url_status($item['url']);
     $isDead = $code === null || $code >= 400;
     if ($isDead) {
-        db()->prepare('DELETE FROM items WHERE id = ?')->execute([$id]);
+        delete_item($id);
         header('Location: /index.php?reported=removed');
         exit;
     }

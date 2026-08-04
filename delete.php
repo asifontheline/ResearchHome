@@ -10,7 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $id = (int)($_POST['id'] ?? 0);
 if ($id > 0) {
-    db()->prepare('DELETE FROM items WHERE id = ?')->execute([$id]);
+    delete_item($id);
 }
 header('Location: /index.php');
 exit;
