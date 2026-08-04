@@ -1114,6 +1114,17 @@ function is_safe_target_url(string $url): bool {
  * item's outbound link is still alive. Returns the final HTTP status code
  * after following redirects, or null if the request couldn't complete at all
  * (DNS failure, connection refused, timeout).
+ *
+ * The GET retry used to only fire when the connection failed outright
+ * (code === 0) -- but some servers (WordPress/OpenEdition-hosted sites
+ * confirmed on production, e.g. hypotheses.org) don't fail the connection,
+ * they respond to HEAD with a genuine-looking error status (404 seen in
+ * practice) while GET on the exact same URL returns 200 with real content.
+ * check_links_batch() treats 404/410 as "definitely gone" and deletes
+ * immediately, no retry grace period -- so a HEAD-intolerant server used to
+ * get a live item deleted on the very first check. Now retries with GET
+ * whenever HEAD comes back as any kind of error (>=400 or unreachable),
+ * not just a hard connection failure, before trusting the verdict.
  */
 function check_url_status(string $url): ?int {
     if (!is_safe_target_url($url)) return null;
@@ -1130,8 +1141,9 @@ function check_url_status(string $url): ?int {
     curl_exec($ch);
     $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
-    if ($code === 0) {
-        // Some servers reject HEAD outright; retry with a minimal ranged GET.
+    if ($code === 0 || $code >= 400) {
+        // Connection failure, or HEAD itself came back as an error --
+        // either way, confirm with a real (ranged) GET before trusting it.
         curl_setopt_array($ch, [CURLOPT_NOBODY => false, CURLOPT_RANGE => '0-0']);
         curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
