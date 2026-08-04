@@ -1808,10 +1808,13 @@ function build_monitor_report(): array {
  * node name, not this site's domain), which fails SPF outright for every
  * domain and gets silently dropped by Gmail — no bounce, nothing.
  */
-function send_email(string $to, string $subject, string $body): bool {
+function send_email(string $to, string $subject, string $body, ?string $replyTo = null): bool {
     $from = defined('CONTACT_EMAIL') && CONTACT_EMAIL !== 'you@example.com' ? CONTACT_EMAIL : null;
     if (!$from) return false;
     $headers = "From: ResHub <{$from}>\r\nContent-Type: text/plain; charset=UTF-8";
+    if ($replyTo) {
+        $headers .= "\r\nReply-To: {$replyTo}";
+    }
     return mail($to, $subject, $body, $headers, '-f' . $from);
 }
 
@@ -1913,6 +1916,17 @@ function process_feedback_emails(): array {
     foreach ($emailNums as $num) {
         $header = imap_headerinfo($conn, $num);
         $subject = isset($header->subject) ? imap_utf8($header->subject) : '(no subject)';
+
+        // Feedback submitted via the site's own floating widget
+        // (feedback_send.php) already landed straight in this inbox as a
+        // plain email -- it didn't come from a human writing one, so it
+        // shouldn't also become a GitHub issue via this poller. Mark seen
+        // and move on without creating anything.
+        if (str_starts_with($subject, '[Widget Feedback]')) {
+            imap_setflag_full($conn, (string)$num, '\\Seen');
+            continue;
+        }
+
         $fromPart = $header->from[0] ?? null;
         $fromAddr = $fromPart ? ($fromPart->mailbox . '@' . $fromPart->host) : 'unknown sender';
 
