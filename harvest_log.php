@@ -19,7 +19,12 @@ $topSearches = db()->query(
      FROM search_log WHERE searched_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
      GROUP BY query ORDER BY times DESC LIMIT 20"
 )->fetchAll();
-$mapPointsAll = get_traffic_map_points('all');
+$trafficDays = get_traffic_days();
+$mapWindow = trim($_GET['map_date'] ?? 'all');
+if ($mapWindow !== 'all' && $mapWindow !== 'today' && !in_array($mapWindow, $trafficDays, true)) {
+    $mapWindow = 'all'; // unknown/tampered value -- fall back rather than pass it straight to the query
+}
+$mapPoints = get_traffic_map_points($mapWindow);
 
 $pageTitle = 'Harvest log';
 require __DIR__ . '/includes/header.php';
@@ -49,8 +54,20 @@ require __DIR__ . '/includes/header.php';
   </tbody>
 </table>
 
-<h3>All-time visitor map</h3>
-<?= render_world_map($mapPointsAll, 'world-map-all') ?>
+<h3>Visitor map</h3>
+<form method="get" class="inline-form map-day-picker">
+  <label>Show:
+    <select name="map_date" onchange="this.form.submit()">
+      <option value="all" <?= $mapWindow === 'all' ? 'selected' : '' ?>>All time</option>
+      <option value="today" <?= $mapWindow === 'today' ? 'selected' : '' ?>>Today</option>
+      <?php foreach ($trafficDays as $d): ?>
+        <option value="<?= h($d) ?>" <?= $mapWindow === $d ? 'selected' : '' ?>><?= h($d) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </label>
+  <noscript><button type="submit">Go</button></noscript>
+</form>
+<?= render_world_map($mapPoints, 'world-map') ?>
 
 <div class="traffic-columns">
   <div>

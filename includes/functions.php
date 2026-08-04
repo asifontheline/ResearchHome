@@ -330,10 +330,22 @@ function get_traffic_summary(): array {
  * merging into too few dots) so exact-duplicate coordinates (the geo API
  * only gives city-level precision to begin with, so same-city visitors
  * often share identical lat/lon already) still collapse into one dot, but
- * nearby-yet-different cities no longer do. $window is 'today' or 'all'.
+ * nearby-yet-different cities no longer do.
+ *
+ * $window is 'all', 'today', or a specific 'YYYY-MM-DD' date -- validated
+ * against a strict format so it's safe to interpolate directly (bound
+ * params can't be used for a dynamic WHERE-vs-no-WHERE shape here without
+ * two near-duplicate query strings; the regex check is the guard instead).
  */
 function get_traffic_map_points(string $window): array {
-    $since = $window === 'today' ? "WHERE pv.viewed_at >= CURDATE()" : '';
+    if ($window === 'today') {
+        $since = 'WHERE pv.viewed_at >= CURDATE()';
+    } elseif (preg_match('/^\d{4}-\d{2}-\d{2}$/', $window) === 1) {
+        $day = db()->quote($window);
+        $since = "WHERE pv.viewed_at >= {$day} AND pv.viewed_at < DATE_ADD({$day}, INTERVAL 1 DAY)";
+    } else {
+        $since = '';
+    }
     return db()->query(
         "SELECT ROUND(g.lat, 2) AS lat, ROUND(g.lon, 2) AS lon,
                 MAX(g.city) AS city, MAX(g.country) AS country,
@@ -341,10 +353,18 @@ function get_traffic_map_points(string $window): array {
          FROM page_views pv
          JOIN geo_cache g ON g.visitor_hash = pv.visitor_hash
          {$since}
-         " . ($window === 'today' ? 'AND' : 'WHERE') . " g.lat IS NOT NULL AND g.lon IS NOT NULL
+         " . ($since !== '' ? 'AND' : 'WHERE') . " g.lat IS NOT NULL AND g.lon IS NOT NULL
          GROUP BY ROUND(g.lat, 2), ROUND(g.lon, 2)
          ORDER BY views DESC"
     )->fetchAll();
+}
+
+/** Every distinct calendar day (UTC) that has at least one page view, newest first -- for the map's day picker. */
+function get_traffic_days(): array {
+    return array_column(
+        db()->query('SELECT DISTINCT DATE(viewed_at) AS d FROM page_views ORDER BY d DESC')->fetchAll(),
+        'd'
+    );
 }
 
 /**
