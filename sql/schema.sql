@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS items (
     failed_checks TINYINT UNSIGNED NOT NULL DEFAULT 0, -- consecutive failures; item is removed past a threshold
     citation_count INT UNSIGNED DEFAULT NULL,   -- from source metadata where available (OpenAlex, Semantic Scholar, Crossref); NULL where the source doesn't report one (arXiv, PubMed, patents)
     content_type ENUM('research','video') NOT NULL DEFAULT 'research', -- 'video' items (YouTube/Vimeo) live in their own section (videos.php), excluded from the main research catalog/search/credits/activity chart
+    language VARCHAR(8) DEFAULT NULL,           -- ISO 639, 2 or 3 letters depending on source; NULL where undetected -- see ensure_items_language_column() in functions.php (self-migrating, this line is for fresh installs only)
     UNIQUE KEY uniq_url_hash (url_hash),
     KEY idx_added_at (added_at),
     KEY idx_last_checked_at (last_checked_at),

@@ -248,6 +248,7 @@ function api_harvest_arxiv(string $subjectSlug, string $keyword, int $max = 8): 
             'authors' => implode(', ', $authors), 'abstract' => $abstract,
             'source_name' => 'arXiv',
             'published_date' => date('Y-m-d', strtotime((string)$entry->published)),
+            'language' => 'en', // arXiv doesn't report one; near-universally English in practice
         ], $tags);
         if ($id) $added++;
     }
@@ -292,6 +293,7 @@ function api_harvest_crossref(string $subjectSlug, string $keyword, int $max = 8
             'source_name' => $msg['publisher'] ?? 'Crossref',
             'published_date' => $published,
             'citation_count' => $msg['is-referenced-by-count'] ?? null,
+            'language' => isset($msg['language']) ? strtolower($msg['language']) : null,
         ], $tags);
         if ($id) $added++;
     }
@@ -329,6 +331,7 @@ function api_harvest_pubmed(string $subjectSlug, string $keyword, int $max = 8):
             'title' => $meta['title'], 'url' => $url,
             'authors' => $meta['authors'], 'abstract' => $meta['abstract'],
             'source_name' => 'PubMed', 'published_date' => $meta['published_date'],
+            'language' => $meta['language'] ?? null,
         ], $tags);
         if ($id) $added++;
     }
@@ -382,6 +385,7 @@ function api_harvest_openalex(string $subjectSlug, string $keyword, int $max = 8
             'source_name' => $work['primary_location']['source']['display_name'] ?? 'OpenAlex',
             'published_date' => $work['publication_date'] ?? null,
             'citation_count' => $work['cited_by_count'] ?? null,
+            'language' => isset($work['language']) ? strtolower($work['language']) : null,
         ], $tags);
         if ($id) $added++;
     }
@@ -466,6 +470,7 @@ function api_harvest_patentsview(string $subjectSlug, string $keyword, int $max 
             'abstract' => $p['patent_abstract'] ?? null,
             'source_name' => 'USPTO',
             'published_date' => $p['patent_date'] ?? null,
+            'language' => 'en', // USPTO filings; PatentsView doesn't report one but this is a safe assumption
         ], $tags);
         if ($id) $added++;
     }
@@ -1124,7 +1129,7 @@ function process_queue_batch(int $limit = 20, ?float $deadline = null): array {
                 'title' => $meta['title'], 'url' => $row['url'],
                 'authors' => $meta['authors'], 'abstract' => $meta['abstract'],
                 'source_name' => $meta['source_name'], 'published_date' => $meta['published_date'],
-                'image_url' => $meta['image_url'],
+                'image_url' => $meta['image_url'], 'language' => $meta['language'] ?? null,
             ], $subjects);
 
             if ($id) $added++;

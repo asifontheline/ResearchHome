@@ -336,7 +336,17 @@ nav { display: flex; gap: 1rem; }
 }
 
 .item-card h3 { margin: 0; font-size: 1.05rem; }
-.item-meta { color: var(--muted); font-size: 0.85rem; display: flex; gap: 0.6rem; margin: 0; }
+.item-meta { color: var(--muted); font-size: 0.85rem; display: flex; gap: 0.6rem; margin: 0; align-items: center; }
+.lang-badge {
+  display: inline-block;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+}
 .item-authors { font-size: 0.9rem; color: var(--muted); margin: 0; }
 .item-abstract { font-size: 0.9rem; margin: 0; }
 

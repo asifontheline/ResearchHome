@@ -690,10 +690,40 @@ function url_hash(string $url): string {
  * regardless of which source/path the item came through, not just the
  * crawler's own generic-HTML-metadata path).
  */
+/**
+ * Self-migrating, same pattern as ensure_subjects_table() -- adds
+ * items.language (ISO 639, 2 or 3 letters depending on what the source
+ * gives us -- <html lang> attributes and Crossref/OpenAlex are 2-letter,
+ * PubMed's esummary is 3-letter, and there's no reason to force a
+ * normalization table just to display a small badge) if it isn't there
+ * yet. Guarded by a settings flag so the INFORMATION_SCHEMA check only
+ * runs once, not on every insert.
+ */
+function ensure_items_language_column(): void {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+
+    if (get_setting('items_language_migrated', '') === '1') {
+        return;
+    }
+
+    $exists = (int) db()->query(
+        "SELECT COUNT(*) FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'items' AND column_name = 'language'"
+    )->fetchColumn();
+    if ($exists === 0) {
+        db()->exec('ALTER TABLE items ADD COLUMN language VARCHAR(8) DEFAULT NULL');
+    }
+    set_setting('items_language_migrated', '1');
+}
+
 function insert_item_if_new(array $fields, array $tagNames = []): ?int {
     if (is_junk_title($fields['title'] ?? '')) {
         return null;
     }
+
+    ensure_items_language_column();
 
     // One captured connection for the whole operation — lastInsertId() is
     // only valid on the exact connection that did the INSERT, so this must
@@ -710,8 +740,8 @@ function insert_item_if_new(array $fields, array $tagNames = []): ?int {
     }
 
     $stmt = $pdo->prepare(
-        'INSERT INTO items (title, url, url_hash, authors, abstract, notes, source_name, published_date, image_url, citation_count, content_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO items (title, url, url_hash, authors, abstract, notes, source_name, published_date, image_url, citation_count, content_type, language)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $stmt->execute([
         mb_strimwidth($fields['title'] ?? 'Untitled', 0, 512, ''),
@@ -725,6 +755,7 @@ function insert_item_if_new(array $fields, array $tagNames = []): ?int {
         $fields['image_url'] ?? null,
         $fields['citation_count'] ?? null,
         $fields['content_type'] ?? 'research',
+        $fields['language'] ?? null,
     ]);
     $itemId = (int) $pdo->lastInsertId();
     if ($itemId <= 0) {
@@ -1169,6 +1200,7 @@ function fetch_arxiv(string $arxivId): ?array {
         'published_date' => date('Y-m-d', strtotime((string)$entry->published)),
         'source_name' => 'arXiv',
         'image_url' => null,
+        'language' => 'en', // arXiv doesn't report one; near-universally English in practice
     ];
 }
 
@@ -1188,6 +1220,7 @@ function fetch_pubmed(string $pmid): ?array {
         'published_date' => isset($doc['pubdate']) ? date('Y-m-d', strtotime($doc['pubdate'])) : null,
         'source_name' => 'PubMed',
         'image_url' => null,
+        'language' => isset($doc['lang'][0]) ? strtolower($doc['lang'][0]) : null, // 3-letter (ISO 639-2/B), e.g. "eng", "ger"
     ];
 }
 
@@ -1209,6 +1242,7 @@ function fetch_crossref(string $doi): ?array {
         'published_date' => $published,
         'source_name' => $msg['publisher'] ?? 'Crossref',
         'image_url' => null,
+        'language' => isset($msg['language']) ? strtolower($msg['language']) : null,
     ];
 }
 
@@ -1308,6 +1342,16 @@ function extract_generic_metadata(string $body, string $url): array {
     $host = parse_url($url, PHP_URL_HOST) ?: 'Web';
     $sourceName = str_contains($host, 'patents.google.com') ? 'Google Patents' : $host;
 
+    // <html lang="..."> is standard, near-universal markup and far cheaper
+    // and more reliable than statistical language detection -- falls back
+    // to og:locale (e.g. "de_DE") when a page skips the lang attribute.
+    $language = null;
+    if (preg_match('#<html[^>]+lang=["\']([a-zA-Z]{2,3})#i', $body, $m)) {
+        $language = strtolower($m[1]);
+    } elseif (($locale = $get_meta('og:locale')) && preg_match('/^([a-zA-Z]{2,3})/', $locale, $m)) {
+        $language = strtolower($m[1]);
+    }
+
     return [
         'title' => $title,
         'authors' => $get_meta('author') ?? $get_meta('citation_author'),
@@ -1315,6 +1359,7 @@ function extract_generic_metadata(string $body, string $url): array {
         'published_date' => ($d = $get_meta('article:published_time') ?? $get_meta('citation_publication_date')) ? date('Y-m-d', strtotime($d)) : null,
         'source_name' => $sourceName,
         'image_url' => $get_meta('og:image'),
+        'language' => $language,
     ];
 }
 

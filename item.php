@@ -27,6 +27,7 @@ require __DIR__ . '/includes/header.php';
   <?php endif; ?>
   <h1><?= h($item['title']) ?></h1>
   <p class="item-meta">
+    <?php if (!empty($item['language'])): ?><span class="lang-badge" title="Language: <?= h(strtoupper($item['language'])) ?>"><?= h(strtoupper($item['language'])) ?></span><?php endif; ?>
     <?php if ($item['source_name']): ?><span class="source"><?= h($item['source_name']) ?></span><?php endif; ?>
     <?php if ($item['published_date']): ?><span class="date"><?= h($item['published_date']) ?></span><?php endif; ?>
     <?php if ($item['citation_count'] !== null): ?><span class="citations"><?= number_format((int)$item['citation_count']) ?> citation<?= (int)$item['citation_count'] === 1 ? '' : 's' ?></span><?php endif; ?>
