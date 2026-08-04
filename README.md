@@ -35,19 +35,42 @@ cPanel shared hosting (tested against a MilesWeb Premium plan). See
   manual add) — the same item never gets cataloged twice
 - **Junk-title filtering** — rejects placeholder pages at insert time
   (Crossref's "Title Pending" pre-registered DOIs, 404/access-denied pages,
-  bot-challenge pages), centralized so every source is covered, not just one
+  bot-challenge pages, and pages whose title turns out to just be the
+  site's own branding rather than an article — e.g. a defunct domain's
+  category-listing pages posing as "articles"), centralized so every
+  source is covered, not just one
+- **Optional video harvesting** (YouTube/Vimeo) — kept as its own content
+  type entirely separate from the research catalog (own section,
+  `videos.php`, own subject rotation); silently inactive until an API
+  key is configured
 
 ### Browsing & search
-- **Subject browsing** — curated, hand-grouped taxonomy (see
-  `includes/subjects.php`), distinct from raw source tags
+- **Subject browsing** — curated, DB-backed taxonomy (85 subjects across
+  sciences, social sciences, humanities, arts, business, ...), grouped by
+  parent category and editable live from the admin console (*Subjects*) —
+  no deploy needed to add or tweak one
 - **Tag browsing** — full directory of every tag, most-used first
-- **Full-text search** (MySQL `MATCH...AGAINST`) across title/authors/
-  abstract/notes
+- **No wrong-tag or zero-tag items** — word-boundary keyword matching (not
+  a raw substring match) avoids false positives, and any item that
+  genuinely can't be classified falls back to a `General` tag rather than
+  landing with nothing — background passes keep retrying `General`-tagged
+  and legacy-mistagged items as the taxonomy grows, so it isn't a
+  permanent dumping ground
+- **Language detection** — each item is tagged with its source language
+  (`<html lang>` for crawled pages, each API's own reported language where
+  available) and shown as a small badge, so a result in an unexpected
+  language is obvious before you click
+- **Combined full-text search** (MySQL `MATCH...AGAINST`), not a single
+  fixed mode — tries an exact phrase, then all words (partial/prefix
+  matching included), then any word, automatically, stopping at the first
+  tier that finds something; only falls through to "nothing found" if
+  every tier genuinely comes up empty
 - **Search that queues its own gaps** — a zero-result search gets queued for
   the harvester to try directly next run, plus immediate fallback links to
   Google Scholar, Semantic Scholar, OpenAlex, arXiv, PubMed, CORE, and BASE
-- **Sort by recency or citation count** — citation counts captured from the
-  sources that report one (OpenAlex, Semantic Scholar, Crossref)
+- **Sort by recency, relevance, or citation count** — citation counts
+  captured from the sources that report one (OpenAlex, Semantic Scholar,
+  Crossref)
 - **Human-readable tags** — arXiv's raw category codes (`cs.LG`, `math.CO`,
   ...) expanded to plain-English labels across its full ~155-code taxonomy
 - **In-page translation** — auto-suggested from the browser's own language
@@ -59,9 +82,16 @@ cPanel shared hosting (tested against a MilesWeb Premium plan). See
 ### Keeping the catalog honest
 - **Reader-facing "Report broken link"** — no login, no GitHub issue; the
   script re-verifies the URL itself before removing anything
-- **Random-sample link health checks** — dead links (404/410, or repeated
-  failures) get pruned automatically every harvest run; sampling instead of
+- **Random-sample link health checks** — dead links get pruned automatically
+  every harvest run, but only after a consistent 3-strikes grace period for
+  *every* failure code, 404/410 included, and a HEAD-request failure is
+  always confirmed with a real GET before being trusted — some servers
+  (WordPress/OpenEdition-hosted sites, confirmed in production) reject HEAD
+  specifically while the page is genuinely live on GET. Sampling instead of
   a FIFO queue so there's no backlog that outgrows the catalog
+- **No orphaned tags** — deleting an item, correcting a tag typo, or
+  reconciling a mistag prunes any tag left with zero items as part of the
+  same operation, not a deferred cleanup job
 - **Credits that don't rot** — every publisher/repository on Credits links to
   its own site root (not a specific deep item page that can move or
   disappear), derived from real harvested URLs rather than guessed
@@ -75,8 +105,10 @@ cPanel shared hosting (tested against a MilesWeb Premium plan). See
   picking up where it left off next run instead of losing work
 - **MySQL reconnect-on-failure** — a dropped connection during a slow
   external API wait doesn't crash the whole run
-- **Harvest capped to one run per clock hour** regardless of cron
-  misconfiguration or duplicate cron entries
+- **Harvest capped to one run per 15-minute slot** regardless of cron
+  misconfiguration or duplicate cron entries; seed crawling itself is split
+  across 4 rotating groups tied to the slot, so every seed still gets
+  crawled about once an hour without one run trying to cover all of them
 - **Email monitoring digest** — self-expiring hourly status report (stuck
   runs, cron-not-firing detection, last N runs), rides along on the existing
   cron rather than needing its own
@@ -102,12 +134,21 @@ cPanel shared hosting (tested against a MilesWeb Premium plan). See
 
 ### Admin console
 - Harvest run history, seed management (add/approve/toggle/delete, incl.
-  reviewing discovered-seed proposals), traffic dashboard, zero-result
+  reviewing discovered-seed proposals), subject taxonomy management
+  (add/edit/delete, no deploy needed), traffic dashboard with a
+  pannable/zoomable visitor map filterable by day, zero-result
   search-miss queue, one-click "run harvest/discovery now"
 
 ### Feedback
-- Pre-filled "bug report" / "feature request" GitHub issue links, plus an
-  email fallback for readers without a GitHub account
+- **Floating feedback widget** — bottom-right on every page, a short message
+  (plus an optional reply email) goes straight to the configured mailbox as
+  plain email — deliberately does *not* create a GitHub issue
+- **Email-to-issue automation** — a separate channel: mail sent directly to
+  the feedback address gets polled once a day and turned into a GitHub
+  issue automatically (explicitly skips anything sent via the widget above,
+  so nothing gets double-handled)
+- Pre-filled "bug report" / "feature request" GitHub issue links for readers
+  who do have a GitHub account and want to file directly
 
 ## Local scheduling (until deployed)
 
@@ -141,17 +182,23 @@ sql/schema.sql         Run this once in phpMyAdmin to create tables
 setup.php              One-time web page to create your admin login (delete after use)
 create_admin.php       CLI alternative to setup.php, if you have SSH/terminal
 index.php / item.php   Browse / search / filter by tag, single item view
+tags.php / credits.php  Full tag directory; publisher/source credits + blocked-seed links
+videos.php             Optional video section (YouTube/Vimeo), separate from the research catalog
 harvest.php            Content harvest entrypoint — run by cron, or on-demand from harvest_log.php
 discover.php           Source-discovery entrypoint — separate cron/cadence from harvest.php
 seeds.php              Admin: manage crawler seed/hub URLs (incl. discovered-seed review)
-harvest_log.php        Admin: harvest run history + "Run harvest now"
+subjects_admin.php     Admin: add/edit/delete the subject taxonomy (DB-backed, no deploy needed)
+subject_edit.php       Admin: edit one subject's label/parent/keywords
+harvest_log.php        Admin: harvest run history, traffic dashboard, "Run harvest now"
 add.php / edit.php     Manual add/edit — a fallback path, not the normal workflow
 delete.php             Delete an item (POST only, admin only)
+report_broken_link.php  Reader-facing "report broken link", no login required
+feedback_send.php      Backend for the floating feedback widget — email only, no GitHub issue
 login.php / logout.php
 includes/
   functions.php         DB/tag/search helpers, shared item-insert logic, link-health check
   harvester.php          API harvest (6 sources) + the bounded crawler
-  subjects.php           Seed subject/keyword list, grouped by parent category — edit freely
+  subjects.php           One-time seed data for the subjects table on first run — not read after that
 assets/                CSS + JS (fetch-metadata button, run-harvest button)
 backups/               mysqldump snapshots (gitignored equivalent — .htaccess-blocked, not deployed)
 ```
@@ -252,17 +299,24 @@ serves `.htaccess` (Apache/LiteSpeed — the MilesWeb default — both do).
 
 ## Notes
 
-- **Tags are fully freeform**, and not capped at a fixed list. `subjects.php`
-  is a *seed* list that drives API search queries and keyword classification
-  — it's deliberately broad (30+ subjects across sciences, social sciences,
-  humanities) and easy to extend, but actual tagging goes further: arXiv
-  items also get arXiv's own declared category codes (`cs.LG`, `q-bio.NC`,
-  `astro-ph.CO`, ...) straight from the API response, and Crossref items get
-  Crossref's own subject-area strings when present. New tags are created
-  on the fly, same as manual tagging always worked.
+- **Tags are fully freeform**, and not capped at a fixed list. The curated
+  subject taxonomy (85 entries, DB-backed — edit live from *Subjects* in the
+  admin console, `includes/subjects.php` is one-time seed data only, not
+  read again after the first run) drives API search queries and keyword
+  classification, but actual tagging goes further: arXiv items also get
+  arXiv's own declared category codes (`cs.LG`, `q-bio.NC`, `astro-ph.CO`,
+  ...) straight from the API response, and Crossref/OpenAlex items get
+  their own subject/topic strings when present. New tags are created on the
+  fly, same as manual tagging always worked. Anything that can't be
+  classified at all gets a `General` fallback rather than landing with zero
+  tags, and background passes keep retrying it against the current
+  taxonomy rather than leaving it there permanently.
 - **Classification is keyword/heuristic-based**, not perfect — a paper can
-  pick up a tag from an incidental keyword match. Acceptable trade-off for
-  an unattended pipeline; tune `subjects.php` if you notice a pattern.
+  pick up a tag from an incidental keyword match. Word-boundary matching
+  (not a raw substring search) and specific compound-phrase keywords
+  (avoiding generic single words that show up constantly in unrelated
+  writing) cut down false positives; tune the taxonomy from *Subjects* in
+  the admin console if you notice a pattern.
 - **The crawler is intentionally bounded**: single hop from configured seed
   pages, `robots.txt`-checked and rate-limited per host, no recursive
   crawling. It is not, and isn't meant to be, an unrestricted web spider —
@@ -272,15 +326,18 @@ serves `.htaccess` (Apache/LiteSpeed — the MilesWeb default — both do).
   anything else. Manual add/edit still exists as a fallback, not the normal
   workflow.
 - Search uses MySQL full-text search over title, authors, abstract, and
-  notes; browsing is tag-filtered. See `DESIGN.md` §5 for the indexing
-  strategy and the scale threshold at which it's worth revisiting.
+  notes, cascading through exact-phrase → all-words → any-word automatically
+  rather than one fixed mode; browsing is tag-filtered and can be scoped to
+  a subject directly from the header search box. See `DESIGN.md` §5 for the
+  indexing strategy and the scale threshold at which it's worth revisiting.
 - Single shared admin login by design (personal catalog, not multi-user).
   Run `setup.php` again after clearing the `users` table via phpMyAdmin if
   you ever need to reset the password.
 - **Broken links are removed automatically.** Every harvest run checks a
-  batch of existing items' URLs; a 404/410 removes the item immediately,
-  other failures (timeouts, 5xx) get up to 3 tries across separate runs
-  first, in case it's transient.
+  batch of existing items' URLs; every failure code, 404/410 included, gets
+  up to 3 tries across separate runs before removal, and a HEAD-request
+  failure is always confirmed with a real GET before it's trusted (some
+  servers reject HEAD specifically while the page is genuinely live).
 - Three optional API keys in `config.php` — all work fine unset, all free to
   register:
   - `NCBI_API_KEY` — raises PubMed's low unauthenticated limit (3 req/s).
@@ -301,7 +358,7 @@ serves `.htaccess` (Apache/LiteSpeed — the MilesWeb default — both do).
   categories, Crossref subject strings, ...) that only accumulate 1-2 items
   don't get their own row in the browse UI — the item is still reachable via
   whatever real subject tag it also carries. Ones that accumulate more than
-  2 items graduate into a visible "Emerging Topics" group automatically.
+  2 items graduate into a visible "Specialized Topics" group automatically.
 - **Local testing**: `backups/` holds `mysqldump` snapshots taken between
   test cycles so accumulated harvest data survives schema changes — schema
   updates should prefer `ALTER TABLE`/`CREATE TABLE IF NOT EXISTS` over

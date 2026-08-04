@@ -47,10 +47,18 @@ each run stays fast. See §4.3.)
 
 ### 4.1 API harvest (primary discovery mechanism)
 
-`includes/subjects.php` is a *seed* list (30+ entries spanning sciences,
-social sciences, humanities — not a hard ceiling on possible tags, see
-below) of slug → label → keyword-list, used to drive keyword queries
-against free structured APIs:
+The curated subject taxonomy (85 entries spanning sciences, social
+sciences, humanities, arts, business, ... — not a hard ceiling on possible
+tags, see below) of slug → label → keyword-list, used to drive keyword
+queries against free structured APIs, lives in a `subjects` DB table, not
+a static file. `includes/subjects.php` is one-time seed data only —
+`ensure_subjects_table()` (`functions.php`) creates the table and imports
+it from that file on first use, then never reads it again. A static file
+would get silently overwritten by every `git push` deploy (the FTP action
+replaces every tracked file, the same reason `config.php` is excluded from
+deploy rather than editable at runtime) — an admin-added subject needs to
+survive that, so it lives in the DB and is manageable live from
+`subjects_admin.php` / `subject_edit.php`, no deploy required:
 
 | Source           | Endpoint                              | Auth       | Covers |
 |------------------|-----------------------------------------|------------|--------|
@@ -80,8 +88,51 @@ classification, so the tag list grows with the data rather than staying
 fixed at whatever we hardcoded.
 
 Each cron run only queries a *rotating subset* of subjects (default 1 of
-30+, cursor persisted in the `settings` table) rather than the whole list —
+85, cursor persisted in the `settings` table) rather than the whole list —
 see §4.3 for why.
+
+#### 4.1.1 Tag quality: no false positives, no zero-tag items
+
+`classify_subjects()` (`functions.php`) matches keywords with word-boundary
+regex, not a raw substring search — a substring match let a single
+generic keyword fire inside unrelated words (confirmed in production: the
+`law` subject's keyword `regulation` false-positive-tagged a gut-microbiota
+article "Law" via "iron regulation"; a `gene` keyword matched inside
+"General Relativity"). Keyword lists lean on specific compound phrases for
+the same reason (`case law` instead of bare `law`, `government regulation`
+instead of bare `regulation`) — a generic single word shows up constantly
+in writing that has nothing to do with the subject it's meant to signal.
+
+Every item gets at least one tag, guaranteed structurally rather than left
+to chance: `insert_item_if_new()` applies a `general` fallback subject
+(empty keyword list, so `classify_subjects()` can never match it directly —
+only this explicit fallback path ever applies it) whenever no source
+category, seed subject, or keyword match produced anything. `general` is
+not a resting state — three background passes, all random-sampled (not a
+FIFO cursor, so nothing can get permanently stuck behind one; see the
+`RAND()`-based query shape in `classify_zero_tag_backlog()`) and run as a
+slice of every 15-minute harvest cycle, keep working the backlog down:
+
+- `retag_backlog_batch()` reconciles every item's taxonomy tags against
+  what the *current* classifier/taxonomy would assign, removing stale
+  false positives and adding newly-matching ones — catches both the
+  substring-bug legacy data and drift from taxonomy edits.
+- `classify_zero_tag_backlog()` re-fetches a zero-tag item's page (falling
+  back to a plain-text body snippet when there's no description meta tag)
+  and retries classification.
+- `reclassify_general_backlog()` retries items still on `general` — this
+  can newly succeed as the taxonomy grows (either from a future `git push`
+  or an admin using `subjects_admin.php`), independent of any change to
+  the item itself.
+
+Deleting an item, correcting a tag, or reconciling a mistag can leave a
+`tags` row with zero items — there was never a code path that cleaned
+that up. `prune_orphaned_tags()` (scoped to the specific tag ids a given
+operation just touched, not a full-table sweep) runs at every point that
+can orphan a tag — `set_item_tags()`, the new `delete_item()` wrapper used
+by every item-deletion call site, and `retag_backlog_batch()`'s direct
+tag removal — so cleanup happens at the same moment as the removal, not a
+deferred batch job.
 
 **On "discovering new sources"**: this project deliberately does not attempt
 to autonomously discover unknown APIs — that's not something that can be
@@ -111,11 +162,21 @@ listing pages), a conservative single-hop crawler:
    larger).
 3. **Discovery**: fetch a due seed hub page, extract outbound `<a href>`
    links, enqueue new ones into `crawl_queue` (deduped by `url_hash`).
-4. **Fetch**: each cron run processes a small batch (default 20) of pending
-   queue rows — fetch the page, extract metadata via the existing
-   `fetch_generic()` (Open Graph / meta tags), classify subject via
-   `classify_subjects()` against title+abstract, insert as an item, mark
-   the queue row `done`.
+4. **Fetch**: each cron run processes a small batch (default 300) of pending
+   queue rows — fetch the page, extract metadata via
+   `extract_generic_metadata()` (Open Graph / meta tags, plus `<html lang>`
+   or `og:locale` for language detection), classify subject via
+   `classify_subjects()` against title+abstract (falling back to a
+   plain-text body snippet when there's no description meta tag), insert
+   as an item, mark the queue row `done`.
+   Rejects a page before insertion if its title is just the site's own
+   branding rather than an article headline (`looks_like_site_branding()`)
+   — confirmed in production: an old, defunct PLOS domain's
+   category-listing pages had plain titles like "PLOS One", no article
+   behind any of them, and ~40 got inserted as fake items before this
+   existed. Two signals: a short title that's essentially the host name
+   with punctuation stripped, or a short title matching a small generic
+   wordlist ("Home", "Journal Home", ...) independent of the host.
 5. **Depth is fixed at 1** (hub → linked page). No recursive crawling —
    this bounds the crawl to "what the seed pages point at" rather than an
    open-ended walk, which is what keeps this both fast and non-abusive.
@@ -150,6 +211,26 @@ discovered=1`) — nothing here is crawled until approved in `seeds.php`'s
 "Pending review" section. This is the deliberate human-in-the-loop control
 mentioned in §2: broader coverage comes from *finding* legitimate sources
 faster, not from trusting arbitrary new domains automatically.
+
+### 4.2.2 Link health
+
+Every harvest run reachability-checks a random sample (not a FIFO queue,
+so there's no backlog that outgrows the catalog as it grows) of existing
+items' URLs (`check_links_batch()`) and removes ones that are truly dead.
+`check_url_status()` sends `HEAD` first (cheaper), retrying with a ranged
+`GET` whenever `HEAD` comes back as any kind of error — not just a hard
+connection failure. That retry condition used to be narrower (only a
+connection failure, `code === 0`), and it mattered: confirmed in
+production, a WordPress/OpenEdition-hosted page
+(`archivalia.hypotheses.org`) returned a 404 to `HEAD` while the exact same
+URL returned 200 with real content on `GET`. Every failure code, 404/410
+included, now goes through the same `LINK_FAILURE_THRESHOLD` (3
+consecutive failures) grace period rather than 404/410 deleting on the
+first check — trades a genuinely dead link lingering a little longer for
+far fewer wrongful deletions of live pages that got blocked or misbehaved
+once. Readers can also flag a specific link directly
+(`report_broken_link.php`, no login) — it re-verifies before acting rather
+than trusting the report blindly.
 
 ### 4.3 Scheduling
 
@@ -196,12 +277,47 @@ coverage of the seed list happens over several cron ticks instead of one —
 an explicit trade of latency-to-full-coverage for per-run reliability,
 appropriate for a background pipeline nobody is watching in real time.
 
+### 4.4 Feedback: two independent channels, deliberately not merged
+
+Two separate paths reach the same mailbox (`FEEDBACK_EMAIL`), and neither
+should trigger the other:
+
+1. **Floating widget** (`feedback_send.php`, no login) — sends a plain
+   email via `send_email()`. Nothing more; it never touches the GitHub API.
+2. **Email-to-issue automation** (`process_feedback_emails()` in
+   `harvester.php`, rides along on the harvest cron, once/day internally
+   via a `settings` date-gate) — polls that same mailbox over IMAP and
+   turns every unread message into a GitHub issue.
+
+Sending the widget's own output back into the mailbox the second mechanism
+polls creates an obvious risk: without a way to tell them apart, every
+widget submission would *also* become a GitHub issue, double-handling
+something the widget's whole reason to exist was to keep out of GitHub
+entirely. The fix is a subject-line marker (`[fdbk]`) the widget sets and
+the poller explicitly checks for — mark as seen, skip, no issue — rather
+than two channels that happen to coexist by accident.
+
 ## 5. Indexing / search-performance plan
 
 The browse/search UI (`index.php`) already does two things per request:
 a MySQL `FULLTEXT` search (`MATCH ... AGAINST`) and a tag-scoped `JOIN`.
 Once the harvester is running unattended, row counts grow continuously and
 unpredictably, so indexing needs to be deliberate rather than default.
+
+**Search match strategy**: rather than one fixed mode, a text query tries
+three candidates in order — exact phrase, then all words required (each
+with a trailing wildcard so a partial/prefix form still counts, e.g.
+"chem" matches "chemistry"), then any word — each checked with a real
+`COUNT` query, stopping at the first tier that finds something
+(`search_match_candidates()` in `functions.php`). A flat OR-of-every-word
+query (the original, simpler design) let a single ordinary word decide a
+match regardless of relevance to the rest of the query — confirmed in
+production, "periodic table elements" surfaced an HR article that only
+shared the word "elements". The any-word tier is still the last resort,
+not dropped: a genuine zero-result page is worse than today's closest
+available match while the query gets queued for the harvester to try
+finding something better — the results page just says so
+(`$isLooseMatch`) rather than presenting a loose match as an exact hit.
 
 **Indexes added in this epic:**
 
@@ -235,17 +351,35 @@ need a persistent service, which shared hosting can't run.
 ```
 hosts            host (PK), robots_rules, robots_fetched_at,
                   crawl_delay_seconds, last_crawled_at, disallowed
-seed_urls         id, url, subject_slug, active, added_at, last_crawled_at
+seed_urls         id, url, subject_slug, seed_group, active, added_at,
+                  last_crawled_at, successful_fetches, failed_fetches,
+                  block_cycles, permanently_disabled
 crawl_queue       id, url, url_hash (unique), host, subject_slug,
                   status(pending/done/skipped/error), discovered_at,
                   processed_at, error
-harvest_log       id, started_at, finished_at, items_added,
+harvest_log       id, started_at, finished_at, run_type
+                  (harvest/discovery/feedback), items_added,
                   links_discovered, errors, detail
-items             + url_hash CHAR(64) UNIQUE, + idx_added_at
+subjects          id, slug (unique), label, parent, keywords —
+                  self-migrated + self-seeded from includes/subjects.php
+                  on first use (see §4.1); live source of truth from then on
+items             + url_hash CHAR(64) UNIQUE, + idx_added_at,
+                  + content_type ENUM(research/video), + language VARCHAR(8)
+                  (self-migrated the same way as `subjects` — see
+                  ensure_items_language_column())
 item_tags         + idx_tag_id
 ```
 
 Full DDL lives in `sql/schema.sql`.
+
+**Self-migrating schema changes**: no SSH access means no way to run a
+migration script directly against production; `sql/schema.sql` is a
+reference for a fresh install, not something re-run on every deploy. Both
+`subjects` and `items.language` instead check `INFORMATION_SCHEMA`/a
+`settings` flag on first use after deploy and `ALTER TABLE`/seed
+themselves if missing (`ensure_subjects_table()`,
+`ensure_items_language_column()`) — a `git push` alone is enough to roll
+out a schema change, no manual DB step required.
 
 ## 7. Rollout plan
 
@@ -272,9 +406,13 @@ for infrastructure shared hosting can't provide.
 ## 8. Risks / open questions
 
 - **Classification quality**: keyword-matching title/abstract against a
-  fixed subject list is simple and will mis-tag or under-tag edge cases.
-  Acceptable for v1; the tag list is just data (`includes/subjects.php`),
-  easy to tune.
+  subject list is simple and will still mis-tag or under-tag edge cases —
+  word-boundary matching and specific compound-phrase keywords (§4.1.1)
+  closed the substring-false-positive class of bug, but a genuinely
+  ambiguous phrase can still land wrong. The taxonomy is DB-backed and
+  editable live from `subjects_admin.php` (§4.1), not a file needing a
+  deploy, so tuning a pattern is now a same-minute fix rather than a
+  code change.
 - **Seed curation is manual**: the crawler only goes where seeds point it.
   This is intentional (bounded scope) but means crawl coverage is only as
   good as the seed list — worth revisiting periodically via `seeds.php`.
