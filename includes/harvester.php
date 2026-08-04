@@ -1155,11 +1155,18 @@ function process_queue_batch(int $limit = 20, ?float $deadline = null): array {
 // ---- Link health: verify existing items, remove ones that are truly dead --
 
 /**
- * A single failed check can be transient (server hiccup, timeout), so items
- * aren't removed on the first failure. HTTP responses that unambiguously
- * mean "this no longer exists" (404/410) count immediately toward removal;
- * everything else (timeouts, 5xx, connection errors) only counts after
- * repeating on a later run, which is what the failed_checks counter is for.
+ * A single failed check can be transient, so items aren't removed on the
+ * first failure -- including a 404/410, which used to skip this grace
+ * period entirely on the theory that those codes unambiguously mean "this
+ * no longer exists." Confirmed false on production: a HEAD-intolerant
+ * server (archivalia.hypotheses.org) returned a 404 to HEAD for a page
+ * that returned 200 with real content on GET, and the item was deleted on
+ * its very first check. check_url_status() now retries with GET before
+ * trusting any error code, which closes that specific gap -- but a
+ * server's bot-detection blocking every method identically (a false 404
+ * regardless of HEAD/GET) is a different failure mode that retry can't
+ * distinguish from a real 404. Every code, however unambiguous it looks,
+ * goes through the same grace period now, consistently.
  */
 const LINK_FAILURE_THRESHOLD = 3;
 
@@ -1188,20 +1195,20 @@ function check_links_batch(int $limit = 8, ?float $deadline = null): array {
         $code = check_url_status($row['url']);
         $checked++;
 
-        $isDefinitelyGone = in_array($code, [404, 410], true);
-        $isUnreachable = $code === null || $code >= 400;
-
         if ($code !== null && $code < 400) {
             db()->prepare('UPDATE items SET last_checked_at = NOW(), failed_checks = 0 WHERE id = ?')
                 ->execute([$row['id']]);
             continue;
         }
 
+        // Every failure counts the same way now, 404/410 included -- see
+        // LINK_FAILURE_THRESHOLD's own comment for why the old "delete
+        // immediately" special case for those two codes was removed.
         $failures = (int)$row['failed_checks'] + 1;
-        if ($isDefinitelyGone || $failures >= LINK_FAILURE_THRESHOLD) {
+        if ($failures >= LINK_FAILURE_THRESHOLD) {
             db()->prepare('DELETE FROM items WHERE id = ?')->execute([$row['id']]);
             $removed++;
-        } elseif ($isUnreachable) {
+        } else {
             db()->prepare('UPDATE items SET last_checked_at = NOW(), failed_checks = ? WHERE id = ?')
                 ->execute([$failures, $row['id']]);
         }
