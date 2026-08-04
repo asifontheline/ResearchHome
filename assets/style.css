@@ -438,21 +438,6 @@ nav { display: flex; gap: 1rem; }
 .source-credits-list { line-height: 1.6; font-size: 0.9rem; }
 .source-credits-list li { margin-bottom: 0.2rem; }
 
-/* Sitewide, shown only while tag_cleanup_pending() (functions.php) is true
-   -- see includes/header.php. Remove both once the one-time tag-cleanup
-   backlog is done for good. */
-.maintenance-notice {
-  background: #fff3cd;
-  color: #664d03;
-  border-bottom: 1px solid #ffe69c;
-  padding: 0.6rem 1.5rem;
-  font-size: 0.85rem;
-  text-align: center;
-}
-@media (prefers-color-scheme: dark) {
-  .maintenance-notice { background: #4a3c0a; color: #ffe69c; border-bottom-color: #6b551a; }
-}
-
 .callout {
   background: var(--panel);
   border: 1px solid var(--accent);

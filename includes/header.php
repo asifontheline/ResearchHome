@@ -159,9 +159,4 @@ if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE
     </nav>
   </div>
 </header>
-<?php if (tag_cleanup_pending()): ?>
-  <div class="maintenance-notice">
-    &#9888;&#65039; Catalog maintenance in progress (tag cleanup) — pages may load a little slower than usual until it finishes.
-  </div>
-<?php endif; ?>
 <main class="container">
