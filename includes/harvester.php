@@ -1103,7 +1103,7 @@ function process_queue_batch(int $limit = 20, ?float $deadline = null): array {
             $meta = extract_generic_metadata($body, $row['url']);
             maybe_flag_hub_candidate($row['url'], $body, $hostIsNew);
 
-            if (!$meta['title']) {
+            if (!$meta['title'] || looks_like_site_branding($meta['title'], $row['host'])) {
                 db()->prepare("UPDATE crawl_queue SET status='skipped', processed_at=NOW() WHERE id=?")->execute([$row['id']]);
                 continue;
             }

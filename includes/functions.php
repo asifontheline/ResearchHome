@@ -1226,6 +1226,46 @@ function is_junk_title(string $title): bool {
     return false;
 }
 
+/**
+ * Catches a different failure mode than is_junk_title(): not a broken/empty
+ * title, but a real, well-formed one that's just the SITE's own name, not a
+ * specific work -- a category/hub/index page's <title> often is exactly
+ * this (confirmed on production: an old PLOS domain's journal-listing pages
+ * each had a plain, short title like "PLOS One", "PLOS Genetics" -- no
+ * article behind them at all, just the site's own section headers -- and
+ * the crawler inserted ~40 of them as fake catalog items since a
+ * short/generic title still isn't "junk" by is_junk_title()'s rules).
+ *
+ * Two independent signals, either one enough on its own:
+ *  1. A short title (<=3 words) that's essentially the host name with the
+ *     punctuation stripped out, either direction -- a real article title
+ *     that happens to be that short and that close to the domain name
+ *     would be a very unusual coincidence.
+ *  2. A short title that's one of a small set of generic navigational
+ *     words ("Home", "Welcome", "Journal Home", ...) -- these say nothing
+ *     about the host at all, so signal 1 alone wouldn't catch them, but
+ *     they're just as clearly not an article headline.
+ * Confirmed on production: an old PLOS domain's journal-listing pages had
+ * titles like "PLOS One" and "PLOS Genetics" (signal 1 -- other PLOS
+ * journal names on that same plosone.org host wouldn't textually match it,
+ * which is why this isn't host-matching alone) -- no article behind any of
+ * them, just the site's own section headers, and ~40 got inserted as fake
+ * catalog items since a short/generic title still isn't "junk" by
+ * is_junk_title()'s rules.
+ */
+function looks_like_site_branding(string $title, string $host): bool {
+    if (str_word_count($title) > 3) return false;
+
+    $normalized = trim(mb_strtolower($title));
+    $genericHubTitles = ['home', 'homepage', 'welcome', 'journal home', 'main page', 'landing page', 'index'];
+    if (in_array($normalized, $genericHubTitles, true)) return true;
+
+    $normalizedTitle = preg_replace('/[^a-z0-9]/', '', $normalized);
+    $normalizedHost = preg_replace('/[^a-z0-9]/', '', mb_strtolower(preg_replace('/^www\./', '', $host)));
+    if ($normalizedTitle === '' || $normalizedHost === '') return false;
+    return str_contains($normalizedHost, $normalizedTitle) || str_contains($normalizedTitle, $normalizedHost);
+}
+
 function fetch_generic(string $url): ?array {
     $body = safe_http_get($url);
     if (!$body) return null;
