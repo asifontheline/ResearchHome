@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/harvester.php'; // assign_next_seed_group()
 require_login();
 
 $subjects = get_subjects();
