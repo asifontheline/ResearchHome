@@ -32,9 +32,12 @@ require __DIR__ . '/includes/header.php';
 
 <h1>Harvest log</h1>
 <p class="muted">
-  Two independent jobs log here: <a href="/harvest.php">harvest.php</a> (content —
-  API sources, crawl, link-health) and <a href="/discover.php">discover.php</a>
-  (source discovery only — proposes new seeds, doesn't touch content).
+  Three independent jobs log here: <a href="/harvest.php">harvest.php</a>
+  (content — API sources, crawl discovery), <a href="/discover.php">discover.php</a>
+  (source discovery only — proposes new seeds, doesn't touch content), and
+  <a href="/validator.php">validator.php</a> (tag validation/correction,
+  subject alignment, URL validation — on its own 5-minute cadence so it
+  can't get starved out by growth in the other two).
   <a href="/seeds.php">Manage seed URLs</a>.
 </p>
 
@@ -190,6 +193,7 @@ require __DIR__ . '/includes/header.php';
 <h2>Runs</h2>
 <button type="button" id="run-harvest-btn">Run harvest now</button>
 <button type="button" id="run-discover-btn">Run discovery now</button>
+<button type="button" id="run-validator-btn">Run validator now</button>
 <p id="run-now-status" class="muted"></p>
 
 <table class="seed-table">
@@ -235,6 +239,7 @@ function runNow(url, btn) {
 }
 document.getElementById('run-harvest-btn').addEventListener('click', function () { runNow('/harvest.php', this); });
 document.getElementById('run-discover-btn').addEventListener('click', function () { runNow('/discover.php', this); });
+document.getElementById('run-validator-btn').addEventListener('click', function () { runNow('/validator.php', this); });
 </script>
 
 <?php require __DIR__ . '/includes/footer.php'; ?>

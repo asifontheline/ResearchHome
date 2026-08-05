@@ -206,7 +206,7 @@ CREATE TABLE IF NOT EXISTS search_log (
 -- is added by hand.
 CREATE TABLE IF NOT EXISTS harvest_log (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    run_type ENUM('harvest','discovery','feedback') NOT NULL DEFAULT 'harvest',
+    run_type ENUM('harvest','discovery','feedback','validator') NOT NULL DEFAULT 'harvest',
     started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     finished_at DATETIME DEFAULT NULL,
     items_added INT UNSIGNED NOT NULL DEFAULT 0,
