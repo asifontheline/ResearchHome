@@ -25,6 +25,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggl
 
 $activity = get_harvest_activity_by_source(30);
 $runs = db()->query('SELECT * FROM harvest_log ORDER BY started_at DESC LIMIT 20')->fetchAll();
+$trafficDays = get_traffic_days();
+$mapWindow = trim($_GET['map_date'] ?? 'all');
+if ($mapWindow !== 'all' && $mapWindow !== 'today' && !in_array($mapWindow, $trafficDays, true)) {
+    $mapWindow = 'all'; // unknown/tampered value -- fall back rather than pass it straight to the query
+}
+$mapPoints = get_traffic_map_points($mapWindow);
 // Same set seeds.php's admin table shows as "active", minus anything still
 // sitting in the discovery review queue (discovered=1, active=0) -- that's
 // an internal moderation step, not vetted yet, so it stays admin-only.
@@ -71,6 +77,26 @@ require __DIR__ . '/includes/header.php';
     <?php endif; ?>
   </tbody>
 </table>
+
+<h2>Visitor map</h2>
+<p class="muted">
+  MVP page-view log (public visitors only, best-effort bot filtering, no raw IPs
+  stored — the IP is only used transiently to resolve a city/region/country via
+  ip-api.com, then discarded).
+</p>
+<form method="get" class="inline-form map-day-picker">
+  <label>Show:
+    <select name="map_date" onchange="this.form.submit()">
+      <option value="all" <?= $mapWindow === 'all' ? 'selected' : '' ?>>All time</option>
+      <option value="today" <?= $mapWindow === 'today' ? 'selected' : '' ?>>Today</option>
+      <?php foreach ($trafficDays as $d): ?>
+        <option value="<?= h($d) ?>" <?= $mapWindow === $d ? 'selected' : '' ?>><?= h($d) ?></option>
+      <?php endforeach; ?>
+    </select>
+  </label>
+  <noscript><button type="submit">Go</button></noscript>
+</form>
+<?= render_world_map($mapPoints, 'world-map') ?>
 
 <h2 id="seeds">Active &amp; disabled seeds</h2>
 <p class="muted">
