@@ -88,6 +88,10 @@ function geolocate_ip(string $ip): ?array {
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 3,
+        // This one matters even more than the others -- it runs inline on
+        // every public page view (record_page_view()), not a background
+        // batch, so a hang here would stall real visitors' page loads.
+        CURLOPT_CONNECTTIMEOUT => 2,
         CURLOPT_USERAGENT => 'ResHub/1.0',
     ]);
     $body = curl_exec($ch);
@@ -1187,6 +1191,14 @@ function check_url_status(string $url): ?int {
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS => 5,
         CURLOPT_TIMEOUT => 10,
+        // CURLOPT_TIMEOUT alone is supposed to bound the whole request, but
+        // DNS resolution can hang past it anyway depending on the system
+        // resolver curl is built against -- confirmed on production,
+        // several validator.php runs sat at "running…" well past their
+        // 4-minute soft deadline (checked only between items, never a
+        // chance to fire if a single fetch never returns). Bounding the
+        // connect phase (DNS + TCP handshake) separately closes that gap.
+        CURLOPT_CONNECTTIMEOUT => 5,
         CURLOPT_USERAGENT => HARVEST_USER_AGENT,
     ]);
     curl_exec($ch);
@@ -1214,6 +1226,9 @@ function safe_http_get(string $url, array $headers = []): ?string {
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS => 5,
         CURLOPT_TIMEOUT => 15,
+        // See check_url_status()'s comment -- CURLOPT_TIMEOUT alone doesn't
+        // reliably bound a hanging DNS lookup on every system.
+        CURLOPT_CONNECTTIMEOUT => 5,
         CURLOPT_USERAGENT => 'ResHub/1.0 (+metadata fetcher)',
         CURLOPT_HTTPHEADER => $headers,
     ]);
