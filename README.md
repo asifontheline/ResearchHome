@@ -12,8 +12,8 @@ coverage comes from stacking legitimate, free, structured sources rather
 than an open-ended crawl of arbitrary sites.
 
 Plain PHP + MySQL, no framework, no build step — built to run on ordinary
-cPanel shared hosting (tested against a MilesWeb Premium plan). See
-`DESIGN.md` for the full architecture writeup.
+web-hosted cPanel shared hosting. See `DESIGN.md` for the full
+architecture writeup.
 
 ## Features
 
@@ -152,7 +152,7 @@ cPanel shared hosting (tested against a MilesWeb Premium plan). See
 
 ## Local scheduling (until deployed)
 
-Before this is deployed to MilesWeb (where mPanel Cron Jobs takes over —
+Before this is deployed (where your host's cPanel Cron Jobs takes over —
 see step 6 below), two macOS LaunchAgents run the harvester locally:
 
 ```
@@ -203,7 +203,7 @@ assets/                CSS + JS (fetch-metadata button, run-harvest button)
 backups/               mysqldump snapshots (gitignored equivalent — .htaccess-blocked, not deployed)
 ```
 
-## Deploying to MilesWeb (cPanel shared hosting)
+## Deploying to web-hosted cPanel shared hosting
 
 1. **Create the MySQL database.**
    cPanel → *MySQL Databases* → create a database (e.g. `researchhome`) and a
@@ -230,9 +230,9 @@ backups/               mysqldump snapshots (gitignored equivalent — .htaccess-
    it up.
 
 6. **Set up two cron jobs — content harvest and source discovery are separate.**
-   MilesWeb's control panel is **mPanel** (`my.milesweb.com` → *My Services* →
-   your hosting package → *Login to mPanel* → *Cron Jobs* → *Add Cron Job*).
-   Per MilesWeb support, the command needs the PHP binary's **absolute path**
+   Most web hosts expose a cPanel-based control panel with a *Cron Jobs*
+   section (find yours via the hosting package's login page → *Cron Jobs* →
+   *Add Cron Job*). The command needs the PHP binary's **absolute path**
    (not just `php`) and should redirect output to a log file — cron runs in
    a stripped-down environment where relative paths and `$PATH` assumptions
    can silently fail:
@@ -243,10 +243,10 @@ backups/               mysqldump snapshots (gitignored equivalent — .htaccess-
    Command:  /usr/bin/php /home/YOURUSER/public_html/PATH/discover.php >> /home/YOURUSER/public_html/PATH/logs/discover.log 2>&1
    Schedule: */30 * * * *       (every 30 minutes)
    ```
-   `/usr/bin/php` is MilesWeb's documented example — if your account has a
-   specific PHP version selected, confirm the actual path (SSH: `which php`,
-   or ask MilesWeb support) before relying on it; a wrong path fails silently
-   under cron even though the same command works fine typed manually.
+   `/usr/bin/php` is a common example — if your account has a specific PHP
+   version selected, confirm the actual path (SSH: `which php`, or ask your
+   host's support) before relying on it; a wrong path fails silently under
+   cron even though the same command works fine typed manually.
    `logs/` already exists in this repo with an `.htaccess` blocking web
    access, so logging cron output there is safe.
 
@@ -295,7 +295,7 @@ backups/               mysqldump snapshots (gitignored equivalent — .htaccess-
 
 `config.php`, `create_admin.php`, and the `includes/` and `sql/` folders are
 blocked from direct web access via `.htaccess`, but double-check your host
-serves `.htaccess` (Apache/LiteSpeed — the MilesWeb default — both do).
+serves `.htaccess` (Apache/LiteSpeed are the common defaults — both do).
 
 ## Notes
 

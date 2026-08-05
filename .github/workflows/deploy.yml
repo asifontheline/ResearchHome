@@ -1,4 +1,4 @@
-name: Deploy to MilesWeb
+name: Deploy via FTP
 
 on:
   push:

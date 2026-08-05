@@ -8,9 +8,14 @@ harvester discovers content, classifies it by subject and type, and publishes
 it to a browsable, searchable, tag-filterable site. Items are metadata + a
 link to the original source — never a copy of the content.
 
-Runs on plain PHP + MySQL on ordinary cPanel shared hosting (MilesWeb
-Premium). No daemon, no persistent process — everything is either a page
-request or a short-lived cron invocation.
+Runs on plain PHP + MySQL on ordinary web-hosted cPanel shared hosting.
+Almost everything is a page request or a short-lived cron invocation
+(harvest, discovery); the one exception is tag/URL validation, which
+runs continuously as a single long-lived `validator_daemon.php` process
+(started once via SSH, cron-watchdog-restarted if it ever dies) instead
+of a cron-batched job — small bounded slices of work every few seconds
+rather than one big batch every N minutes, so the backlog can't outpace
+it under high harvest volume.
 
 ## 2. Non-goals
 
@@ -421,5 +426,5 @@ for infrastructure shared hosting can't provide.
   still self-throttles to at most once/hour independently of cron cadence
   (§4.1), so PubMed's actual call frequency hasn't changed. Would need
   `NCBI_API_KEY` set if that per-source cooldown itself were ever shortened.
-- **cPanel cron availability**: confirmed as standard on the MilesWeb
-  Premium plan (cPanel → Cron Jobs).
+- **cPanel cron availability**: confirmed as standard on the web host
+  used in production (cPanel → Cron Jobs).
