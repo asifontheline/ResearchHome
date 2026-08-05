@@ -129,7 +129,9 @@ architecture writeup.
   (host resource limit, OOM kill, reboot); does no validation work itself
 - **Admin "run now"** buttons for on-demand harvest/discovery/validator
   runs outside the regular cron cadence
-- **CI/CD via GitHub Actions** — push to `main` auto-deploys over FTP
+- **CI/CD via GitHub Actions** — push to `main` auto-deploys over FTPS,
+  no build step, never deletes untracked server-side files; see
+  "Continuous deployment" below for the full workflow
 
 ### Privacy, trust & legal
 - **Privacy-respecting analytics** — page views and an approximate
@@ -221,6 +223,50 @@ includes/
 assets/                CSS + JS (fetch-metadata button, run-harvest button)
 backups/               mysqldump snapshots (gitignored equivalent — .htaccess-blocked, not deployed)
 ```
+
+## Continuous deployment
+
+After the one-time manual setup in "Deploying" below, every subsequent
+change ships itself — `.github/workflows/deploy.yml` defines a single
+GitHub Actions workflow, **Deploy via FTP**:
+
+- **Trigger**: any push to `main` (or a manual run via the Actions tab's
+  "Run workflow" button — `workflow_dispatch`, useful if a deploy needs
+  retriggering without a new commit, e.g. after rotating FTP credentials).
+- **What it does**: checks out the repo (`actions/checkout@v4`), then
+  uploads it over **FTPS** (encrypted, not plain FTP) to the host using
+  [`SamKirkland/FTP-Deploy-Action`](https://github.com/SamKirkland/FTP-Deploy-Action),
+  targeting `server-dir: /ResHome/`.
+- **No build step** — there's nothing to compile; the files that get
+  uploaded are exactly the files in the repo, verbatim.
+- **What's excluded from every deploy**: `.git*`, `.github/`, `.claude/`,
+  and — critically — `config.php`. The action's default "clean slate" mode
+  (delete anything on the server not in this push) is explicitly **off**,
+  so this is additive/overwrite-only: it never deletes server-side files
+  the repo doesn't track. That's what keeps `config.php` (DB credentials,
+  real per-environment secrets — not committed at all, see
+  `config.example.php`), `backups/*.sql`, `logs/*.log`, and anything else
+  written at runtime safe across every deploy.
+- **Credentials**: `FTP_SERVER` / `FTP_USERNAME` / `FTP_PASSWORD` are
+  GitHub Actions repo secrets (*Settings → Secrets and variables →
+  Actions*), never committed. Set these once when forking/self-hosting.
+- **Database migrations need no separate deploy step.** Schema changes
+  ship as self-migrating code (`ensure_*_table()` / `ensure_*_column()`
+  functions in `includes/functions.php` / `includes/harvester.php` that
+  check `INFORMATION_SCHEMA` and `ALTER TABLE`/`CREATE TABLE IF NOT
+  EXISTS` themselves on first use) rather than a migration script that has
+  to be run manually — a plain shared-hosting constraint (no direct DB
+  shell access assumed) that turned into a genuinely simpler deploy story:
+  push to `main`, the next page load or cron tick that touches the
+  changed table brings the schema up to date on its own.
+- **The one thing this workflow can't do**: restart `validator_daemon.php`
+  (see "Deploying" step 6b) — a running PHP process doesn't pick up
+  changed code on disk. After a deploy that touches `validator_daemon.php`
+  itself, `kill` the running PID over SSH; the watchdog cron (or a manual
+  `nohup ... &`) brings it back up on the new code within ~10 minutes.
+  Everything else (page requests, cron-invoked `harvest.php`/`discover.php`/
+  `validator.php`) always runs the latest deployed code automatically,
+  since PHP re-reads the file from disk on every request/invocation.
 
 ## Deploying to web-hosted cPanel shared hosting
 
