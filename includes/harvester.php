@@ -1525,6 +1525,15 @@ function count_real_errors(array $errors): int {
 // potentially blocking up to 4 ticks under the old 59-minute timeout.
 const HARVEST_MAX_RUNTIME_MINUTES = 14;
 
+// Reserved exclusively for tag/URL validation (retag/zero-tag/general/
+// language/link-health passes) at the end of run_content_harvest() -- the
+// earlier discovery/harvest steps get a tighter deadline
+// ($deadline - this) so growth in seed list / crawl queue size can't
+// starve validation out entirely by consuming the whole run. A time
+// reservation, not an item quota, so it scales with whatever the run's
+// total budget actually is.
+const HARVEST_VALIDATION_RESERVED_MINUTES = 4;
+
 /**
  * True if a harvest run has already started in this 15-minute slot
  * (:00/:15/:30/:45). A hard cap independent of the lock above — the lock
@@ -1568,6 +1577,19 @@ function run_content_harvest(): array {
     }
 
     $deadline = microtime(true) + HARVEST_MAX_RUNTIME_MINUTES * 60;
+    // Discovery/harvest steps (API calls, seed crawl, queue processing) get
+    // a tighter deadline than the full run -- otherwise, as the seed list
+    // and crawl queue grow, they can eat the *entire* budget and leave
+    // nothing for tag/URL validation, every single run, worse as load
+    // increases (confirmed as a real structural risk, not hypothetical:
+    // process_queue_batch's own nominal cap has already been raised twice
+    // in this file's history for exactly this growth pattern). Validation
+    // below uses the full $deadline, so it's guaranteed at least
+    // HARVEST_VALIDATION_RESERVED_MINUTES regardless of how much the
+    // earlier steps want to consume -- a time reservation, not a count,
+    // so it scales with whatever "15 minutes" actually holds rather than a
+    // fixed item quota that stops meaning anything as the catalog grows.
+    $crawlDeadline = $deadline - HARVEST_VALIDATION_RESERVED_MINUTES * 60;
     $subjects = get_subjects();
     $logPdo = db();
     $logPdo->prepare("INSERT INTO harvest_log (started_at, run_type) VALUES (NOW(), 'harvest')")->execute();
@@ -1590,14 +1612,14 @@ function run_content_harvest(): array {
     try {
         $hostsBefore = (int) db()->query('SELECT COUNT(*) FROM hosts')->fetchColumn();
 
-        $api = run_api_harvest($subjects, 5, 1, $deadline);
+        $api = run_api_harvest($subjects, 5, 1, $crawlDeadline);
         $itemsAdded += $api['added'];
         $errors = array_merge($errors, $api['errors']);
         if ($api['skipped']) {
             $errors[] = 'Skipped (called within the last hour): ' . implode(', ', $api['skipped']);
         }
 
-        $searchMisses = harvest_search_misses(3, 5, $deadline);
+        $searchMisses = harvest_search_misses(3, 5, $crawlDeadline);
         $itemsAdded += $searchMisses['added'];
         $errors = array_merge($errors, $searchMisses['errors']);
 
@@ -1605,7 +1627,7 @@ function run_content_harvest(): array {
         // research-catalog $itemsAdded total shown in the harvest log — kept
         // as a separate figure so "items added" there keeps meaning
         // "research catalog grew by N", not conflated with video counts.
-        $video = run_video_harvest($subjects, 5, $deadline);
+        $video = run_video_harvest($subjects, 5, $crawlDeadline);
         $videoItemsAdded = $video['added'];
         $errors = array_merge($errors, $video['errors']);
 
@@ -1614,7 +1636,7 @@ function run_content_harvest(): array {
         // group of ~1/4 the seeds now), with the deadline check inside the
         // loop still protecting against this eating the whole time budget
         // if the seed list grows a lot further.
-        $seeds = crawl_due_seeds(200, $deadline);
+        $seeds = crawl_due_seeds(200, $crawlDeadline);
         $linksDiscovered = $seeds['discovered'];
         $errors = array_merge($errors, $seeds['errors']);
 
@@ -1630,22 +1652,27 @@ function run_content_harvest(): array {
         // check inside the loop still bails out safely if this ever runs
         // long, so raising the nominal cap just means more gets attempted
         // when there's time budget to spare, not a hard commitment.
-        $queue = process_queue_batch(300, $deadline);
+        $queue = process_queue_batch(300, $crawlDeadline);
         $itemsAdded += $queue['added'];
         $queueErrors = $queue['errors'];
 
-        $linkCheck = check_links_batch(8, $deadline);
+        // Validation from here down uses the FULL $deadline, not
+        // $crawlDeadline -- guaranteed HARVEST_VALIDATION_RESERVED_MINUTES
+        // regardless of how much the discovery/harvest steps above
+        // consumed. Batch sizes raised (were 8/15/15/15) since they're now
+        // reliably guaranteed real time to work with instead of whatever
+        // happened to be left over.
+        $linkCheck = check_links_batch(25, $deadline);
         $linksChecked = $linkCheck['checked'];
         $itemsRemoved = $linkCheck['removed'];
 
-        // Backlog cleanup, both purely additive to whatever time budget is
-        // left after the steps above -- see retag_backlog_batch() and
+        // Backlog cleanup -- see retag_backlog_batch() and
         // classify_zero_tag_backlog() for why these run as background
         // batches instead of a one-off admin action.
         $retag = retag_backlog_batch(500, $deadline);
-        $zeroTag = classify_zero_tag_backlog(15, $deadline);
-        $general = reclassify_general_backlog(15, $deadline);
-        $language = backfill_language_batch(15, $deadline);
+        $zeroTag = classify_zero_tag_backlog(50, $deadline);
+        $general = reclassify_general_backlog(50, $deadline);
+        $language = backfill_language_batch(50, $deadline);
         if ($retag['checked'] > 0 || $zeroTag['checked'] > 0 || $general['checked'] > 0 || $language['checked'] > 0) {
             $errors[] = "Tag cleanup: reviewed {$retag['checked']} existing item(s), retagged {$retag['retagged']}, "
                 . "rescued {$retag['rescued']} newly-zero-tag; zero-tag scan checked {$zeroTag['checked']}, "
