@@ -35,6 +35,30 @@ function release_run_lock(string $lockName): void {
     set_setting("{$lockName}_lock_started_at", '');
 }
 
+/**
+ * A run that gets SIGKILLed by the host (resource/wall-clock limit
+ * enforcement, confirmed on production via `ps aux` showing no such
+ * process actually alive despite harvest_log saying "running…") skips
+ * *everything* PHP-side meant to leave an honest record -- the run-lock's
+ * own staleness check already lets the next cron tick proceed regardless
+ * (see acquire_run_lock()), but the harvest_log row itself just sits with
+ * finished_at NULL forever, displaying as permanently "running" when the
+ * process has been dead for a while. Called right after a successful
+ * acquire_run_lock() in each orchestrator, so every run's very first
+ * action is closing out its own run_type's stale history, same
+ * self-healing spirit as the lock itself. $maxMinutes should match that
+ * run_type's own *_MAX_RUNTIME_MINUTES; doubled here as a buffer so a run
+ * that's merely taking a while isn't mistaken for a crash.
+ */
+function mark_stale_runs_as_crashed(string $runType, int $maxMinutes): void {
+    db()->prepare(
+        "UPDATE harvest_log SET finished_at = NOW(), errors = GREATEST(errors, 1),
+         detail = CONCAT(COALESCE(detail, ''), CASE WHEN detail IS NULL OR detail = '' THEN '' ELSE '\n' END,
+             'Crashed: process never completed (likely killed by a host resource/time limit -- confirmed via `ps aux` showing no such process alive). Marked closed by a later run.')
+         WHERE run_type = ? AND finished_at IS NULL AND started_at < DATE_SUB(NOW(), INTERVAL ? MINUTE)"
+    )->execute([$runType, $maxMinutes * 2]);
+}
+
 function time_budget_exceeded(float $deadline): bool {
     return microtime(true) > $deadline;
 }
@@ -1568,6 +1592,7 @@ function run_content_harvest(): array {
             'errors' => ['Skipped: a previous harvest run is still within its ' . HARVEST_MAX_RUNTIME_MINUTES . '-minute window — avoiding an overlapping run.'],
         ];
     }
+    mark_stale_runs_as_crashed('harvest', HARVEST_MAX_RUNTIME_MINUTES);
 
     $deadline = microtime(true) + HARVEST_MAX_RUNTIME_MINUTES * 60;
     $subjects = get_subjects();
@@ -1732,6 +1757,7 @@ function run_validator(): array {
     }
 
     ensure_harvest_log_validator_run_type();
+    mark_stale_runs_as_crashed('validator', VALIDATOR_MAX_RUNTIME_MINUTES);
 
     $deadline = microtime(true) + VALIDATOR_MAX_RUNTIME_MINUTES * 60;
     $logPdo = db();
@@ -1790,6 +1816,7 @@ function run_source_discovery(): array {
             'errors' => ['Skipped: a previous discovery run is still within its ' . DISCOVERY_MAX_RUNTIME_MINUTES . '-minute window — avoiding an overlapping run.'],
         ];
     }
+    mark_stale_runs_as_crashed('discovery', DISCOVERY_MAX_RUNTIME_MINUTES);
 
     $logPdo = db();
     $logPdo->prepare("INSERT INTO harvest_log (started_at, run_type) VALUES (NOW(), 'discovery')")->execute();
