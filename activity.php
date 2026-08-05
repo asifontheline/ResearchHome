@@ -4,6 +4,13 @@ require_once __DIR__ . '/includes/auth.php';
 
 $activity = get_harvest_activity_by_source(30);
 $runs = db()->query('SELECT * FROM harvest_log ORDER BY started_at DESC LIMIT 20')->fetchAll();
+// Same set seeds.php's admin table shows as "active", minus anything still
+// sitting in the discovery review queue (discovered=1, active=0) -- that's
+// an internal moderation step, not vetted yet, so it stays admin-only.
+// Public, read-only: no toggle/delete actions here, see seeds.php for those.
+$publicSeeds = db()->query(
+    "SELECT * FROM seed_urls WHERE NOT (discovered = 1 AND active = 0) ORDER BY added_at DESC"
+)->fetchAll();
 
 $pageTitle = 'Activity';
 require __DIR__ . '/includes/header.php';
@@ -39,6 +46,30 @@ require __DIR__ . '/includes/header.php';
     <?php endforeach; ?>
     <?php if (!$runs): ?>
       <tr><td colspan="8" class="muted">No harvest runs logged yet.</td></tr>
+    <?php endif; ?>
+  </tbody>
+</table>
+
+<h2>Active &amp; disabled seeds</h2>
+<p class="muted">
+  Hub / listing pages the crawler starts from (e.g. an arXiv category listing,
+  a topic RSS feed, a search results page) — it follows outbound links one hop
+  and only touches pages <code>robots.txt</code> allows, rate-limited per host.
+  A seed disables itself automatically after repeated failed fetches.
+</p>
+<table class="seed-table">
+  <thead><tr><th>URL</th><th>Subject</th><th>Active</th><th>Last crawled</th></tr></thead>
+  <tbody>
+    <?php foreach ($publicSeeds as $s): ?>
+      <tr>
+        <td><a href="<?= h($s['url']) ?>" target="_blank" rel="noopener noreferrer"><?= h($s['url']) ?></a></td>
+        <td><?= h(subject_label($s['subject_slug'])) ?></td>
+        <td><?= $s['active'] ? 'yes' : 'no' ?></td>
+        <td><?= h($s['last_crawled_at'] ?? 'never') ?></td>
+      </tr>
+    <?php endforeach; ?>
+    <?php if (!$publicSeeds): ?>
+      <tr><td colspan="4" class="muted">No seeds yet.</td></tr>
     <?php endif; ?>
   </tbody>
 </table>
