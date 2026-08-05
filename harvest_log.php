@@ -3,7 +3,15 @@ require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
 require_login();
 
-$runs = db()->query('SELECT * FROM harvest_log ORDER BY started_at DESC LIMIT 50')->fetchAll();
+// Webpage only shows the last 3 days -- older rows stay in the table
+// untouched (nothing here deletes anything), just not rendered on this
+// page. LIMIT 2000 is a safety cap against a pathological runaway, not
+// the real limit -- 3 days of validator (every 5 min) + harvest (every
+// 15 min) + discovery (every 30 min) runs is normally well under that.
+$runs = db()->query(
+    "SELECT * FROM harvest_log WHERE started_at >= DATE_SUB(NOW(), INTERVAL 3 DAY)
+     ORDER BY started_at DESC LIMIT 2000"
+)->fetchAll();
 $activity = get_harvest_activity_by_source(30);
 $traffic = get_traffic_summary();
 $searchMisses = db()->query(
@@ -190,7 +198,7 @@ require __DIR__ . '/includes/header.php';
 <h2>Items added, last 30 days</h2>
 <?= render_activity_chart($activity) ?>
 
-<h2>Runs</h2>
+<h2>Runs (last 3 days)</h2>
 <button type="button" id="run-harvest-btn">Run harvest now</button>
 <button type="button" id="run-discover-btn">Run discovery now</button>
 <button type="button" id="run-validator-btn">Run validator now</button>
