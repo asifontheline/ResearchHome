@@ -39,6 +39,15 @@
 
 * { box-sizing: border-box; }
 
+/* overflow-x: hidden lives on html only -- that's the actual viewport-level
+   scroller, so it doesn't interfere with anything. It used to be
+   duplicated onto body too (guarding the same horizontal-overflow issue
+   the same way), but ANY ancestor between a position:sticky element and
+   the real viewport having a non-visible overflow breaks sticky for that
+   element and everything inside it -- confirmed as the cause of the site
+   header not sticking on scroll. html's own overflow-x:hidden is exempt
+   from that since it IS the viewport's scrolling box, not an intermediate
+   clipping container. */
 html { overflow-x: hidden; }
 body {
   margin: 0;
@@ -46,8 +55,6 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
-  overflow-x: hidden;
-  max-width: 100vw;
 }
 
 a { color: var(--accent); text-decoration: none; }
