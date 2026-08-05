@@ -2,12 +2,34 @@
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
 
+// Enable/disable is the one action available right on this public page,
+// and only when logged in -- everything else (add/approve/delete) stays
+// on seeds.php. Guarded the same way seeds.php guards its own POSTs.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggle_seed') {
+    require_login();
+    $id = (int)($_POST['id'] ?? 0);
+    $current = db()->prepare('SELECT active FROM seed_urls WHERE id = ?');
+    $current->execute([$id]);
+    $wasActive = (bool) $current->fetchColumn();
+    // Same reset-on-re-enable behavior as seeds.php's toggle action -- a
+    // manual re-enable is an explicit "give it another chance" that should
+    // override the automatic permanent-disable/cooldown state.
+    if ($wasActive) {
+        db()->prepare('UPDATE seed_urls SET active = 0 WHERE id = ?')->execute([$id]);
+    } else {
+        db()->prepare('UPDATE seed_urls SET active = 1, failed_fetches = 0, block_cycles = 0, permanently_disabled = 0 WHERE id = ?')->execute([$id]);
+    }
+    header('Location: /activity.php#seeds');
+    exit;
+}
+
 $activity = get_harvest_activity_by_source(30);
 $runs = db()->query('SELECT * FROM harvest_log ORDER BY started_at DESC LIMIT 20')->fetchAll();
 // Same set seeds.php's admin table shows as "active", minus anything still
 // sitting in the discovery review queue (discovered=1, active=0) -- that's
 // an internal moderation step, not vetted yet, so it stays admin-only.
-// Public, read-only: no toggle/delete actions here, see seeds.php for those.
+// Visible to everyone; only the enable/disable toggle (handled above)
+// requires login -- add/approve/delete stay on seeds.php.
 $publicSeeds = db()->query(
     "SELECT * FROM seed_urls WHERE NOT (discovered = 1 AND active = 0) ORDER BY added_at DESC"
 )->fetchAll();
@@ -50,7 +72,7 @@ require __DIR__ . '/includes/header.php';
   </tbody>
 </table>
 
-<h2>Active &amp; disabled seeds</h2>
+<h2 id="seeds">Active &amp; disabled seeds</h2>
 <p class="muted">
   Hub / listing pages the crawler starts from (e.g. an arXiv category listing,
   a topic RSS feed, a search results page) — it follows outbound links one hop
@@ -58,7 +80,7 @@ require __DIR__ . '/includes/header.php';
   A seed disables itself automatically after repeated failed fetches.
 </p>
 <table class="seed-table">
-  <thead><tr><th>URL</th><th>Subject</th><th>Active</th><th>Last crawled</th></tr></thead>
+  <thead><tr><th>URL</th><th>Subject</th><th>Active</th><th>Last crawled</th><?php if (current_user()): ?><th></th><?php endif; ?></tr></thead>
   <tbody>
     <?php foreach ($publicSeeds as $s): ?>
       <tr>
@@ -66,10 +88,19 @@ require __DIR__ . '/includes/header.php';
         <td><?= h(subject_label($s['subject_slug'])) ?></td>
         <td><?= $s['active'] ? 'yes' : 'no' ?></td>
         <td><?= h($s['last_crawled_at'] ?? 'never') ?></td>
+        <?php if (current_user()): ?>
+          <td>
+            <form method="post" class="inline-form">
+              <input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
+              <input type="hidden" name="action" value="toggle_seed">
+              <button type="submit" class="link-button"><?= $s['active'] ? 'disable' : 'enable' ?></button>
+            </form>
+          </td>
+        <?php endif; ?>
       </tr>
     <?php endforeach; ?>
     <?php if (!$publicSeeds): ?>
-      <tr><td colspan="4" class="muted">No seeds yet.</td></tr>
+      <tr><td colspan="<?= current_user() ? 5 : 4 ?>" class="muted">No seeds yet.</td></tr>
     <?php endif; ?>
   </tbody>
 </table>
