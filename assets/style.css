@@ -458,6 +458,13 @@ nav { display: flex; gap: 1rem; }
 .error { color: var(--error); }
 .success { color: var(--success); }
 
+/* "No exact/all-words match, showing closest instead" note on a search --
+   called out in bold blue (not the default muted gray) since it's telling
+   the visitor these results aren't quite what they searched for, not just
+   incidental page copy. Overrides .muted's gray/small-text (both classes
+   are present on the same <p> -- see index.php). */
+.loose-match-note { color: var(--accent); font-weight: 700; }
+
 .credits-list { padding-left: 1.5rem; line-height: 1.9; }
 .credits-list li { margin-bottom: 0.5rem; }
 .source-credits-list { line-height: 1.6; font-size: 0.9rem; }
