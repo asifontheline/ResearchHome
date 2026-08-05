@@ -77,18 +77,30 @@ architecture writeup.
   header, drives Google's translation engine without ever showing its
   non-responsive dropdown UI
 - **Activity page** — per-day, per-source "items added" chart (custom inline
-  SVG, no charting library) plus recent harvest run history, public
+  SVG, no charting library), recent harvest run history, the visitor map,
+  and the active/disabled seed list (read-only for visitors; admins get an
+  inline enable/disable toggle without leaving the page) — all public
+- **Sticky header** — search box, subject filter, and nav stay reachable
+  at the top of the viewport while scrolling, on every page
 
 ### Keeping the catalog honest
 - **Reader-facing "Report broken link"** — no login, no GitHub issue; the
   script re-verifies the URL itself before removing anything
-- **Random-sample link health checks** — dead links get pruned automatically
-  every harvest run, but only after a consistent 3-strikes grace period for
-  *every* failure code, 404/410 included, and a HEAD-request failure is
-  always confirmed with a real GET before being trusted — some servers
-  (WordPress/OpenEdition-hosted sites, confirmed in production) reject HEAD
-  specifically while the page is genuinely live on GET. Sampling instead of
-  a FIFO queue so there's no backlog that outgrows the catalog
+- **Continuous tag/URL validator** — a single long-running daemon
+  (`validator_daemon.php`, started once via SSH, cron-watchdog-restarted if
+  it ever dies) instead of a periodic batch job: small bounded slices of
+  link-health checks, retagging, zero-tag rescue, `General`-upgrade, and
+  language backfill every few seconds, so validation can't fall behind
+  under high harvest volume the way a fixed cron cadence eventually would.
+  Each slice runs under a hard `pcntl_alarm()` interrupt, not just a soft
+  deadline check, so one hung network call can't wedge the whole process
+- **Random-sample link health checks** — dead links get pruned automatically,
+  but only after a consistent 3-strikes grace period for *every* failure
+  code, 404/410 included, and a HEAD-request failure is always confirmed
+  with a real GET before being trusted — some servers (WordPress/OpenEdition-
+  hosted sites, confirmed in production) reject HEAD specifically while the
+  page is genuinely live on GET. Sampling instead of a FIFO queue so
+  there's no backlog that outgrows the catalog
 - **No orphaned tags** — deleting an item, correcting a tag typo, or
   reconciling a mistag prunes any tag left with zero items as part of the
   same operation, not a deferred cleanup job
@@ -112,8 +124,11 @@ architecture writeup.
 - **Email monitoring digest** — self-expiring hourly status report (stuck
   runs, cron-not-firing detection, last N runs), rides along on the existing
   cron rather than needing its own
-- **Admin "run now"** buttons for on-demand harvest/discovery outside the
-  regular cron cadence
+- **Watchdog cron for the validator daemon** — a lightweight `pgrep` check
+  every ~10 minutes restarts `validator_daemon.php` if it's ever gone
+  (host resource limit, OOM kill, reboot); does no validation work itself
+- **Admin "run now"** buttons for on-demand harvest/discovery/validator
+  runs outside the regular cron cadence
 - **CI/CD via GitHub Actions** — push to `main` auto-deploys over FTP
 
 ### Privacy, trust & legal
@@ -133,11 +148,12 @@ architecture writeup.
   original source, never a mirror of the content itself
 
 ### Admin console
-- Harvest run history, seed management (add/approve/toggle/delete, incl.
-  reviewing discovered-seed proposals), subject taxonomy management
-  (add/edit/delete, no deploy needed), traffic dashboard with a
-  pannable/zoomable visitor map filterable by day, zero-result
-  search-miss queue, one-click "run harvest/discovery now"
+- Harvest/discovery/validator run history (last 3 days), seed management
+  (add/approve/toggle/delete, incl. reviewing discovered-seed proposals),
+  subject taxonomy management (add/edit/delete, no deploy needed), traffic
+  dashboard with a pannable/zoomable visitor map filterable by day,
+  zero-result search-miss queue, one-click "run harvest/discovery/
+  validator now"
 
 ### Feedback
 - **Floating feedback widget** — bottom-right on every page, a short message
@@ -186,10 +202,13 @@ tags.php / credits.php  Full tag directory; publisher/source credits + blocked-s
 videos.php             Optional video section (YouTube/Vimeo), separate from the research catalog
 harvest.php            Content harvest entrypoint — run by cron, or on-demand from harvest_log.php
 discover.php           Source-discovery entrypoint — separate cron/cadence from harvest.php
+validator.php          One-batch tag/URL validation entrypoint — on-demand ("Run validator now") or cron fallback
+validator_daemon.php   Continuous tag/URL validator — the normal way validation runs, see "Deploying" below
+bin/validator_watchdog.sh  Cron script: restarts validator_daemon.php if it's ever not running
 seeds.php              Admin: manage crawler seed/hub URLs (incl. discovered-seed review)
 subjects_admin.php     Admin: add/edit/delete the subject taxonomy (DB-backed, no deploy needed)
 subject_edit.php       Admin: edit one subject's label/parent/keywords
-harvest_log.php        Admin: harvest run history, traffic dashboard, "Run harvest now"
+harvest_log.php        Admin: harvest/discovery/validator run history, traffic dashboard, "Run now" buttons
 add.php / edit.php     Manual add/edit — a fallback path, not the normal workflow
 delete.php             Delete an item (POST only, admin only)
 report_broken_link.php  Reader-facing "report broken link", no login required
@@ -252,17 +271,18 @@ backups/               mysqldump snapshots (gitignored equivalent — .htaccess-
 
    `harvest.php` rotates through **one** subject across all 6 sources (not
    the whole 30+-subject list — see `DESIGN.md` §4.3/§5 for why), crawls its
-   assigned quarter of the active seed list (see below), processes a batch
-   of the discovered-link queue, and verifies a batch of existing items are
-   still reachable (removing dead links). Full subject coverage happens
-   across many runs, by design. Each of the 6 content sources self-throttles
-   to at most once per hour regardless of cron cadence, so running this
-   every 15 minutes doesn't over-fetch them — it just means the
-   seed-crawling, queue-processing, and link-health parts of the run get 4x
-   more wall-clock time per hour to work through, which matters more as the
-   seed list and catalog grow. `harvest_already_ran_this_slot()` still caps
-   it to one run per 15-minute window even if the cron entry misfires more
-   often than that.
+   assigned quarter of the active seed list (see below), and processes a
+   batch of the discovered-link queue. Full subject coverage happens across
+   many runs, by design. Each of the 6 content sources self-throttles to at
+   most once per hour regardless of cron cadence, so running this every 15
+   minutes doesn't over-fetch them — it just means the seed-crawling and
+   queue-processing parts of the run get 4x more wall-clock time per hour
+   to work through, which matters more as the seed list and catalog grow.
+   `harvest_already_ran_this_slot()` still caps it to one run per 15-minute
+   window even if the cron entry misfires more often than that. Link-health
+   checking, retagging, and language backfill are **not** part of
+   `harvest.php` at all — see step 6b below for the continuous validator
+   that owns all of that.
 
    **Seed crawling is split into 4 rotating groups**, not "all active seeds
    every run" — each seed gets a `seed_group` (0-3), assigned round-robin
@@ -279,6 +299,30 @@ backups/               mysqldump snapshots (gitignored equivalent — .htaccess-
    fetching — and self-throttles to once per 24h internally, so running it
    every 30 minutes just means a new source gets picked up promptly once a
    day rather than fetching anything more often than that.
+
+6b. **Start the continuous validator (requires SSH; no direct cPanel
+    equivalent).** Tag correction, zero-tag rescue, link-health checks, and
+    language backfill run as their own long-lived process rather than a
+    cron batch, so they can't fall behind under high harvest volume. Over
+    SSH, from the app directory:
+    ```
+    nohup php validator_daemon.php >> logs/validator_daemon.log 2>&1 &
+    ```
+    Then add a watchdog cron so it restarts itself if the host ever kills
+    it (OOM, wall-clock/resource limit, reboot) — this one *does* go in
+    cPanel's Cron Jobs, since it's just a cheap periodic check, not the
+    long-lived process itself:
+    ```
+    Command:  /bin/sh /home/YOURUSER/public_html/PATH/bin/validator_watchdog.sh
+    Schedule: */10 * * * *       (every 10 minutes)
+    ```
+    Calling it via `/bin/sh <path>` rather than executing the script path
+    directly avoids depending on the execute bit surviving an FTP deploy.
+    Skipping this step entirely still works — `validator.php` (a single
+    bounded batch, same logic, no daemon) runs from the admin "Run
+    validator now" button and could be cron'd the conventional way instead
+    if you'd rather not run a persistent process at all — it just won't
+    keep up as well once harvest volume is high.
 
 7. **Add a few seed URLs — or let the harvester find them.**
    Log in → *Seeds* → add hub/listing pages yourself (e.g. an arXiv category
@@ -333,11 +377,12 @@ serves `.htaccess` (Apache/LiteSpeed are the common defaults — both do).
 - Single shared admin login by design (personal catalog, not multi-user).
   Run `setup.php` again after clearing the `users` table via phpMyAdmin if
   you ever need to reset the password.
-- **Broken links are removed automatically.** Every harvest run checks a
-  batch of existing items' URLs; every failure code, 404/410 included, gets
-  up to 3 tries across separate runs before removal, and a HEAD-request
-  failure is always confirmed with a real GET before it's trusted (some
-  servers reject HEAD specifically while the page is genuinely live).
+- **Broken links are removed automatically.** The validator daemon checks a
+  batch of existing items' URLs on every iteration; every failure code,
+  404/410 included, gets up to 3 tries across separate checks before
+  removal, and a HEAD-request failure is always confirmed with a real GET
+  before it's trusted (some servers reject HEAD specifically while the
+  page is genuinely live).
 - Three optional API keys in `config.php` — all work fine unset, all free to
   register:
   - `NCBI_API_KEY` — raises PubMed's low unauthenticated limit (3 req/s).

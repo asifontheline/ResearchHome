@@ -65,7 +65,9 @@ require __DIR__ . '/includes/header.php';
   Source code, issues, and pull requests:
   <a href="https://github.com/asifontheline/ResearchHome" target="_blank" rel="noopener noreferrer">github.com/asifontheline/ResearchHome</a>.
   Contributions are genuinely welcome — new subjects, new free API sources, better
-  classification heuristics, bug fixes. See
+  classification heuristics, bug fixes. Start with the
+  <a href="https://github.com/asifontheline/ResearchHome#readme" target="_blank" rel="noopener noreferrer">README</a>
+  for the full feature list and self-hosting instructions, see
   <a href="https://github.com/asifontheline/ResearchHome/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener noreferrer">CONTRIBUTING.md</a>
   for what to know before opening a PR, and
   <a href="https://github.com/asifontheline/ResearchHome/blob/main/DESIGN.md" target="_blank" rel="noopener noreferrer">DESIGN.md</a>
