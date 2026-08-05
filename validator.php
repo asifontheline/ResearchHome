@@ -34,9 +34,15 @@ set_time_limit($isCli ? VALIDATOR_MAX_RUNTIME_MINUTES * 60 : 60);
 $result = run_validator();
 
 if ($isCli) {
+    // count_real_errors(), not a bare count() -- the informational
+    // "Validator: checked N, tagged N, ..." summary line always appears in
+    // $result['errors'] (that's just where it's stashed to reach the log),
+    // and a bare count() would report "Errors: 1" on every fully
+    // successful run. Matches what harvest_log already shows in the admin
+    // panel, which does use the filtered count.
     printf(
         "Validator done. Links checked: %d. Items removed: %d. Errors: %d.\n",
-        $result['links_checked'] ?? 0, $result['items_removed'] ?? 0, count($result['errors'] ?? [])
+        $result['links_checked'] ?? 0, $result['items_removed'] ?? 0, count_real_errors($result['errors'] ?? [])
     );
     foreach ($result['errors'] ?? [] as $e) {
         fwrite(STDERR, $e . "\n");
