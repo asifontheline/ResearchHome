@@ -59,7 +59,7 @@ if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE
   ?>
   <form class="search-form" action="/index.php" method="get">
     <input type="text" name="q" placeholder="Search title, authors, abstract, notes…" value="<?= h($_GET['q'] ?? '') ?>">
-    <select name="tag" aria-label="Limit search to a subject">
+    <select name="tag" aria-label="Limit search to a subject" onchange="this.form.submit()">
       <option value="">All subjects</option>
       <?php foreach ($headerGrouped['groups'] as $parent => $groupSubjects): ?>
         <optgroup label="<?= h($parent) ?>">
