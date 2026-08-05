@@ -61,6 +61,14 @@ a:hover { text-decoration: underline; }
   border-bottom: 1px solid var(--border);
   background: var(--panel);
   flex-wrap: wrap;
+  /* Stays on screen while scrolling on every page (search + nav always
+     reachable) -- sticky rather than fixed because this header's height
+     varies with flex-wrap at narrow widths, and sticky needs no matching
+     body padding-top / JS height calc to avoid page content jumping under
+     a fixed bar the way position:fixed would. */
+  position: sticky;
+  top: 0;
+  z-index: 50;
 }
 
 .brand { font-weight: 700; font-size: 1.1rem; color: var(--text); }
