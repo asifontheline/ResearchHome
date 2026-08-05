@@ -71,7 +71,17 @@ printf(
     date('Y-m-d H:i:s'), getmypid(), $hasPcntl ? 'available' : 'NOT available -- best-effort only'
 );
 
-$agg = ['links_checked' => 0, 'links_validated' => 0, 'items_removed' => 0, 'retagged' => 0, 'rescued' => 0, 'general_upgraded' => 0, 'language_detected' => 0];
+function validator_daemon_fresh_agg(): array {
+    return [
+        'links_checked' => 0, 'links_validated' => 0, 'items_removed' => 0,
+        'retag_checked' => 0, 'retagged' => 0, 'rescued' => 0,
+        'zero_tag_checked' => 0, 'zero_tag_tagged' => 0, 'zero_tag_fallback' => 0,
+        'general_checked' => 0, 'general_upgraded' => 0,
+        'language_checked' => 0, 'language_detected' => 0,
+    ];
+}
+
+$agg = validator_daemon_fresh_agg();
 $lastFlush = time();
 $windowStart = date('Y-m-d H:i:s');
 
@@ -81,11 +91,15 @@ function validator_daemon_flush(array &$agg, string &$windowStart): void {
          VALUES (?, NOW(), 'validator', ?, ?, ?, 0, ?)"
     )->execute([
         $windowStart, $agg['links_checked'], $agg['links_validated'], $agg['items_removed'],
-        "Daemon summary since {$windowStart}: retagged {$agg['retagged']}, rescued {$agg['rescued']}, "
-            . "General-upgraded {$agg['general_upgraded']}, language-detected {$agg['language_detected']}.",
+        "Daemon summary since {$windowStart}: reviewed {$agg['retag_checked']} existing item(s), "
+            . "retagged {$agg['retagged']}, rescued {$agg['rescued']} newly-zero-tag; "
+            . "zero-tag scan checked {$agg['zero_tag_checked']}, tagged {$agg['zero_tag_tagged']}, "
+            . "fell back to General for {$agg['zero_tag_fallback']}; "
+            . "General-reclassify checked {$agg['general_checked']}, upgraded {$agg['general_upgraded']}; "
+            . "language backfill checked {$agg['language_checked']}, detected {$agg['language_detected']}.",
     ]);
     printf("%s Flushed summary to harvest_log.\n", date('Y-m-d H:i:s'));
-    $agg = ['links_checked' => 0, 'links_validated' => 0, 'items_removed' => 0, 'retagged' => 0, 'rescued' => 0, 'general_upgraded' => 0, 'language_detected' => 0];
+    $agg = validator_daemon_fresh_agg();
     $windowStart = date('Y-m-d H:i:s');
 }
 
@@ -105,14 +119,21 @@ while (!$shuttingDown) {
         $agg['items_removed'] += $linkCheck['removed'];
 
         $retag = retag_backlog_batch(50, $iterationDeadline);
+        $agg['retag_checked'] += $retag['checked'];
         $agg['retagged'] += $retag['retagged'];
         $agg['rescued'] += $retag['rescued'];
 
-        classify_zero_tag_backlog(5, $iterationDeadline);
+        $zeroTag = classify_zero_tag_backlog(5, $iterationDeadline);
+        $agg['zero_tag_checked'] += $zeroTag['checked'];
+        $agg['zero_tag_tagged'] += $zeroTag['tagged'];
+        $agg['zero_tag_fallback'] += $zeroTag['fallback'];
+
         $general = reclassify_general_backlog(5, $iterationDeadline);
+        $agg['general_checked'] += $general['checked'];
         $agg['general_upgraded'] += $general['upgraded'];
 
         $language = backfill_language_batch(5, $iterationDeadline);
+        $agg['language_checked'] += $language['checked'];
         $agg['language_detected'] += $language['detected'];
 
         if ($hasPcntl) pcntl_alarm(0); // disarm -- this iteration finished cleanly
