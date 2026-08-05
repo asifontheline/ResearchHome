@@ -205,7 +205,7 @@ require __DIR__ . '/includes/header.php';
 <p id="run-now-status" class="muted"></p>
 
 <table class="seed-table">
-  <thead><tr><th>Type</th><th>Started (UTC)</th><th>Finished (UTC)</th><th>Items added</th><th>Links discovered</th><th>Links checked</th><th>Items removed (dead links)</th><th>New hosts</th><th>New seeds</th><th>Errors</th></tr></thead>
+  <thead><tr><th>Type</th><th>Started (UTC)</th><th>Finished (UTC)</th><th>Items added</th><th>Links discovered</th><th>Links checked</th><th>Links validated</th><th>Items removed (dead links)</th><th>New hosts</th><th>New seeds</th><th>Errors</th></tr></thead>
   <tbody>
     <?php foreach ($runs as $r): ?>
       <tr>
@@ -215,6 +215,7 @@ require __DIR__ . '/includes/header.php';
         <td><?= (int)$r['items_added'] ?></td>
         <td><?= (int)$r['links_discovered'] ?></td>
         <td><?= (int)$r['links_checked'] ?></td>
+        <td><?= (int)($r['links_validated'] ?? 0) ?></td>
         <td><?= (int)$r['items_removed'] ?></td>
         <td><?= (int)$r['new_hosts_discovered'] ?></td>
         <td><?= (int)$r['new_seeds_discovered'] ?></td>
@@ -222,7 +223,7 @@ require __DIR__ . '/includes/header.php';
       </tr>
     <?php endforeach; ?>
     <?php if (!$runs): ?>
-      <tr><td colspan="10" class="muted">No runs yet. Set up cron, or click one of the buttons above.</td></tr>
+      <tr><td colspan="11" class="muted">No runs yet. Set up cron, or click one of the buttons above.</td></tr>
     <?php endif; ?>
   </tbody>
 </table>

@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS harvest_log (
     items_added INT UNSIGNED NOT NULL DEFAULT 0,
     links_discovered INT UNSIGNED NOT NULL DEFAULT 0,
     links_checked INT UNSIGNED NOT NULL DEFAULT 0,
+    links_validated INT UNSIGNED NOT NULL DEFAULT 0, -- subset of links_checked confirmed alive (checked minus removed minus failed-but-under-threshold)
     items_removed INT UNSIGNED NOT NULL DEFAULT 0,
     new_hosts_discovered INT UNSIGNED NOT NULL DEFAULT 0,
     new_seeds_discovered INT UNSIGNED NOT NULL DEFAULT 0,

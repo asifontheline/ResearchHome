@@ -1212,6 +1212,7 @@ function check_links_batch(int $limit = 8, ?float $deadline = null): array {
 
     $checked = 0;
     $removed = 0;
+    $validated = 0;
     foreach ($rows as $row) {
         if ($deadline !== null && time_budget_exceeded($deadline)) {
             break; // remaining items just wait for next run's check
@@ -1222,6 +1223,7 @@ function check_links_batch(int $limit = 8, ?float $deadline = null): array {
         if ($code !== null && $code < 400) {
             db()->prepare('UPDATE items SET last_checked_at = NOW(), failed_checks = 0 WHERE id = ?')
                 ->execute([$row['id']]);
+            $validated++;
             continue;
         }
 
@@ -1238,7 +1240,7 @@ function check_links_batch(int $limit = 8, ?float $deadline = null): array {
         }
     }
 
-    return ['checked' => $checked, 'removed' => $removed];
+    return ['checked' => $checked, 'removed' => $removed, 'validated' => $validated];
 }
 
 /**
@@ -1723,6 +1725,29 @@ function ensure_harvest_log_validator_run_type(): void {
 }
 
 /**
+ * Self-migrating, same pattern as the others -- adds harvest_log.links_validated
+ * (distinct from links_checked: checked is every URL attempted, validated
+ * is the subset confirmed alive, i.e. checked minus removed minus the ones
+ * that failed but stayed under LINK_FAILURE_THRESHOLD).
+ */
+function ensure_harvest_log_links_validated_column(): void {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+    if (get_setting('harvest_log_links_validated_migrated', '') === '1') {
+        return;
+    }
+    $exists = (int) db()->query(
+        "SELECT COUNT(*) FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'harvest_log' AND column_name = 'links_validated'"
+    )->fetchColumn();
+    if ($exists === 0) {
+        db()->exec('ALTER TABLE harvest_log ADD COLUMN links_validated INT UNSIGNED NOT NULL DEFAULT 0');
+    }
+    set_setting('harvest_log_links_validated_migrated', '1');
+}
+
+/**
  * Tag/URL validation -- entirely separate from run_content_harvest(): own
  * cron entry (validator.php), own run-lock, own harvest_log run_type. Not
  * embedded in the harvest run because it used to share a deadline with the
@@ -1764,12 +1789,16 @@ function run_validator(): array {
     $logPdo->prepare("INSERT INTO harvest_log (started_at, run_type) VALUES (NOW(), 'validator')")->execute();
     $logId = (int) $logPdo->lastInsertId();
 
+    ensure_harvest_log_links_validated_column();
+
     $linksChecked = 0;
+    $linksValidated = 0;
     $itemsRemoved = 0;
     $errors = [];
     try {
         $linkCheck = check_links_batch(25, $deadline);
         $linksChecked = $linkCheck['checked'];
+        $linksValidated = $linkCheck['validated'];
         $itemsRemoved = $linkCheck['removed'];
 
         $retag = retag_backlog_batch(500, $deadline);
@@ -1777,7 +1806,7 @@ function run_validator(): array {
         $general = reclassify_general_backlog(50, $deadline);
         $language = backfill_language_batch(50, $deadline);
 
-        $errors[] = "Validator: link-check checked {$linksChecked}, removed {$itemsRemoved}; "
+        $errors[] = "Validator: link-check checked {$linksChecked}, validated {$linksValidated}, removed {$itemsRemoved}; "
             . "reviewed {$retag['checked']} existing item(s), retagged {$retag['retagged']}, "
             . "rescued {$retag['rescued']} newly-zero-tag; zero-tag scan checked {$zeroTag['checked']}, "
             . "tagged {$zeroTag['tagged']}, fell back to General for {$zeroTag['fallback']}; "
@@ -1790,12 +1819,12 @@ function run_validator(): array {
     }
 
     db()->prepare(
-        'UPDATE harvest_log SET finished_at = NOW(), links_checked = ?, items_removed = ?, errors = ?, detail = ? WHERE id = ?'
+        'UPDATE harvest_log SET finished_at = NOW(), links_checked = ?, links_validated = ?, items_removed = ?, errors = ?, detail = ? WHERE id = ?'
     )->execute([
-        $linksChecked, $itemsRemoved, count_real_errors($errors), implode("\n", $errors), $logId,
+        $linksChecked, $linksValidated, $itemsRemoved, count_real_errors($errors), implode("\n", $errors), $logId,
     ]);
 
-    return ['links_checked' => $linksChecked, 'items_removed' => $itemsRemoved, 'errors' => $errors];
+    return ['links_checked' => $linksChecked, 'links_validated' => $linksValidated, 'items_removed' => $itemsRemoved, 'errors' => $errors];
 }
 
 // Must stay under the cron interval (30 min) so a genuinely-stuck run's
