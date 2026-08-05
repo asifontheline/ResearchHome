@@ -109,13 +109,16 @@ if (!empty($_COOKIE['googtrans']) && preg_match('#^/en/([a-zA-Z-]+)$#', $_COOKIE
       <?php endif; ?>
     </table>
     <?php
-      // Homepage-only milestone badge: every 1,000 items gets a little
-      // celebration next to the stat box. Recomputed on every load, so it
-      // always reflects the most recently crossed thousand, not a one-time
-      // event that needs tracking anywhere.
+      // Every 1,000 items gets a little celebration next to the stat box.
+      // Recomputed on every load, so it always reflects the most recently
+      // crossed thousand, not a one-time event that needs tracking
+      // anywhere. Shown on every page (not just the homepage, as before)
+      // -- gating it to $isHomePage made the header a different width on
+      // index.php than everywhere else, so the shared header wasn't
+      // actually identical across pages.
       $milestoneK = intdiv($summary['total_items'], 1000);
     ?>
-    <?php if (!empty($isHomePage) && $milestoneK >= 1): ?>
+    <?php if ($milestoneK >= 1): ?>
       <div class="milestone-badge" aria-label="<?= $milestoneK ?>,000+ milestone">
         <span class="milestone-blast" aria-hidden="true"></span>
         <span class="milestone-text">&#127881; <span id="milestone-num" data-target="<?= $milestoneK * 1000 ?>">0</span>+</span>
