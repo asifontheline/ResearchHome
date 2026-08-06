@@ -796,13 +796,36 @@ function discover_sources_openalex(int $max = 15): array {
     $type = $types[$typeIndex];
     set_setting('openalex_source_type_cursor', (string) (($typeIndex + 1) % count($types)));
 
+    // Per-type page cursor -- without this, every call re-fetches the exact
+    // same top-of-works_count slice forever. propose_seed() dedupes by host
+    // (seed_host_known()), so once that top slice is exhausted (a matter of
+    // days), every future run finds nothing new and proposes 0 permanently,
+    // never reaching page 2+ of OpenAlex's ~250k-entry index. Confirmed as
+    // the reason smaller/regional sources (Indian institutional repositories
+    // -- IITs/NITs/IIMs/IISc/central universities, East Asian sources, etc.)
+    // never got proposed: works_count ranks huge Western multi-disciplinary
+    // repositories/journals at the very top, so anything else sits well
+    // past page 1 and this function could structurally never get there.
+    $pageKey = "openalex_source_page_cursor_{$type}";
+    $page = max(1, (int) get_setting($pageKey, '1'));
+
     $contact = defined('CONTACT_EMAIL') ? '&mailto=' . urlencode(CONTACT_EMAIL) : '';
-    $filter = urlencode("type:{$type},works_count:>5000");
-    $body = safe_http_get("https://api.openalex.org/sources?filter={$filter}&sort=works_count:desc&per-page=" . ($max * 3) . $contact);
+    $filter = urlencode("type:{$type},works_count:>1000");
+    $perPage = $max * 3;
+    $body = safe_http_get("https://api.openalex.org/sources?filter={$filter}&sort=works_count:desc&per-page={$perPage}&page={$page}{$contact}");
     if (!$body) return ['proposed' => 0, 'error' => 'OpenAlex Sources request failed'];
 
     $data = json_decode($body, true);
     $sources = $data['results'] ?? [];
+
+    // Ran off the end of the ranked list (fewer results than a full page,
+    // or none at all) -- wrap back to page 1 rather than incrementing
+    // forever into guaranteed-empty pages. Also means the top of the list
+    // gets periodically re-visited, catching newly-added OpenAlex sources
+    // over time instead of only ever moving forward once.
+    $nextPage = (count($sources) < $perPage) ? 1 : $page + 1;
+    set_setting($pageKey, (string) $nextPage);
+
     $proposed = 0;
     foreach ($sources as $source) {
         if ($proposed >= $max) break;
@@ -810,7 +833,7 @@ function discover_sources_openalex(int $max = 15): array {
         if (!$homepage || !filter_var($homepage, FILTER_VALIDATE_URL)) continue;
         if (propose_seed($homepage, null, 'openalex-sources')) $proposed++;
     }
-    return ['proposed' => $proposed];
+    return ['proposed' => $proposed, 'page' => $page];
 }
 
 /**
