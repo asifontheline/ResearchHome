@@ -106,6 +106,21 @@ function validator_daemon_flush(array &$agg, string &$windowStart): void {
     $windowStart = date('Y-m-d H:i:s');
 }
 
+// Each of the 6 sub-tasks runs its own try/catch (see below) rather than
+// sharing one for the whole iteration -- confirmed on production that a
+// single failing sub-task (a missing-column bug in check_links_batch,
+// which runs early) silently starved every task after it in the same
+// iteration, including totally unrelated ones like the General-reclassify
+// pass, for as long as that bug was live. This function isolates one
+// sub-task so a failure in it can never block its siblings.
+function validator_daemon_run_task(string $label, callable $fn): void {
+    try {
+        $fn();
+    } catch (Throwable $e) {
+        printf("%s Sub-task '%s' failed: %s -- other sub-tasks this iteration still ran.\n", date('Y-m-d H:i:s'), $label, $e->getMessage());
+    }
+}
+
 while (!$shuttingDown) {
     try {
         if ($hasPcntl) pcntl_alarm(ITERATION_HARD_TIMEOUT_SECONDS);
@@ -119,35 +134,49 @@ while (!$shuttingDown) {
         // Catches up any items still missing a validation_group (pre-
         // existing catalog, before this column existed) -- cheap, pure-DB,
         // fine to run every iteration; naturally becomes a no-op once done.
-        $groupBackfill = backfill_validation_groups_batch(200, $iterationDeadline);
-        $agg['groups_backfilled'] += $groupBackfill['assigned'];
+        validator_daemon_run_task('validation-group backfill', function () use (&$agg, $iterationDeadline) {
+            $r = backfill_validation_groups_batch(200, $iterationDeadline);
+            $agg['groups_backfilled'] += $r['assigned'];
+        });
 
-        $linkCheck = check_links_batch(5, $iterationDeadline);
-        $agg['links_checked'] += $linkCheck['checked'];
-        $agg['links_validated'] += $linkCheck['validated'];
-        $agg['items_removed'] += $linkCheck['removed'];
+        validator_daemon_run_task('link-check', function () use (&$agg, $iterationDeadline) {
+            $r = check_links_batch(5, $iterationDeadline);
+            $agg['links_checked'] += $r['checked'];
+            $agg['links_validated'] += $r['validated'];
+            $agg['items_removed'] += $r['removed'];
+        });
 
-        $retag = retag_backlog_batch(50, $iterationDeadline);
-        $agg['retag_checked'] += $retag['checked'];
-        $agg['retagged'] += $retag['retagged'];
-        $agg['rescued'] += $retag['rescued'];
+        validator_daemon_run_task('retag', function () use (&$agg, $iterationDeadline) {
+            $r = retag_backlog_batch(50, $iterationDeadline);
+            $agg['retag_checked'] += $r['checked'];
+            $agg['retagged'] += $r['retagged'];
+            $agg['rescued'] += $r['rescued'];
+        });
 
-        $zeroTag = classify_zero_tag_backlog(5, $iterationDeadline);
-        $agg['zero_tag_checked'] += $zeroTag['checked'];
-        $agg['zero_tag_tagged'] += $zeroTag['tagged'];
-        $agg['zero_tag_fallback'] += $zeroTag['fallback'];
+        validator_daemon_run_task('zero-tag rescue', function () use (&$agg, $iterationDeadline) {
+            $r = classify_zero_tag_backlog(5, $iterationDeadline);
+            $agg['zero_tag_checked'] += $r['checked'];
+            $agg['zero_tag_tagged'] += $r['tagged'];
+            $agg['zero_tag_fallback'] += $r['fallback'];
+        });
 
-        $general = reclassify_general_backlog(5, $iterationDeadline);
-        $agg['general_checked'] += $general['checked'];
-        $agg['general_upgraded'] += $general['upgraded'];
+        validator_daemon_run_task('General-reclassify', function () use (&$agg, $iterationDeadline) {
+            $r = reclassify_general_backlog(5, $iterationDeadline);
+            $agg['general_checked'] += $r['checked'];
+            $agg['general_upgraded'] += $r['upgraded'];
+        });
 
-        $language = backfill_language_batch(5, $iterationDeadline);
-        $agg['language_checked'] += $language['checked'];
-        $agg['language_detected'] += $language['detected'];
+        validator_daemon_run_task('language backfill', function () use (&$agg, $iterationDeadline) {
+            $r = backfill_language_batch(5, $iterationDeadline);
+            $agg['language_checked'] += $r['checked'];
+            $agg['language_detected'] += $r['detected'];
+        });
 
         if ($hasPcntl) pcntl_alarm(0); // disarm -- this iteration finished cleanly
     } catch (Throwable $e) {
         if ($hasPcntl) pcntl_alarm(0);
+        // Only a truly whole-iteration failure lands here now (the hard
+        // pcntl_alarm timeout itself, or something outside all 6 sub-tasks).
         printf("%s Iteration failed: %s -- continuing.\n", date('Y-m-d H:i:s'), $e->getMessage());
         // The alarm (if that's what interrupted us) could have fired
         // mid-query and left the connection in a bad state -- reconnect

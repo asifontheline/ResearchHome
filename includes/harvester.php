@@ -1902,12 +1902,14 @@ function ensure_harvest_log_links_validated_column(): void {
  *   4. URL validation — check_links_batch()
  * Plus language backfill, which rides along on the same cadence.
  *
- * A literal always-on background thread isn't possible on this hosting
- * (no SSH, no persistent daemon) — a 5-minute cron with its own run-lock
- * (self-heals if a run gets stuck, same as harvest.php/discover.php) is
- * the closest safe equivalent: frequent enough to feel continuous, lock-
- * protected against the overlapping-invocations failure mode that caused
- * a real DB connection-exhaustion incident earlier (a since-removed
+ * This is the one-shot batch version -- the normal way validation runs
+ * now is validator_daemon.php, a genuinely continuous process (SSH access
+ * turned out to be available after all). This function stays as the
+ * on-demand "Run validator now" admin button and a cron-fallback path for
+ * hosts that can't run a persistent process, with its own run-lock
+ * (self-heals if a run gets stuck, same as harvest.php/discover.php) --
+ * lock-protected against the overlapping-invocations failure mode that
+ * caused a real DB connection-exhaustion incident earlier (a since-removed
  * standalone worker script driven by an unlocked 1-minute cron).
  */
 function run_validator(): array {
@@ -1932,18 +1934,57 @@ function run_validator(): array {
     $linksValidated = 0;
     $itemsRemoved = 0;
     $errors = [];
+
+    // Each sub-task isolated in its own try/catch -- confirmed on
+    // production that a failure early in this sequence (a missing-column
+    // bug in check_links_batch) silently skipped every task after it,
+    // including totally unrelated ones like General-reclassify, for as
+    // long as that bug was live. A partial run (5 of 6 tasks succeeding)
+    // is far better than a zero-progress run over one bad task.
+    $groupBackfill = ['assigned' => 0];
+    $retag = ['checked' => 0, 'retagged' => 0, 'rescued' => 0];
+    $zeroTag = ['checked' => 0, 'tagged' => 0, 'fallback' => 0];
+    $general = ['checked' => 0, 'upgraded' => 0];
+    $language = ['checked' => 0, 'detected' => 0];
     try {
-        $groupBackfill = backfill_validation_groups_batch(2000, $deadline);
+        try {
+            $groupBackfill = backfill_validation_groups_batch(2000, $deadline);
+        } catch (Throwable $e) {
+            $errors[] = 'Validator sub-task (validation-group backfill) failed: ' . $e->getMessage();
+        }
 
-        $linkCheck = check_links_batch(25, $deadline);
-        $linksChecked = $linkCheck['checked'];
-        $linksValidated = $linkCheck['validated'];
-        $itemsRemoved = $linkCheck['removed'];
+        try {
+            $linkCheck = check_links_batch(25, $deadline);
+            $linksChecked = $linkCheck['checked'];
+            $linksValidated = $linkCheck['validated'];
+            $itemsRemoved = $linkCheck['removed'];
+        } catch (Throwable $e) {
+            $errors[] = 'Validator sub-task (link-check) failed: ' . $e->getMessage();
+        }
 
-        $retag = retag_backlog_batch(500, $deadline);
-        $zeroTag = classify_zero_tag_backlog(50, $deadline);
-        $general = reclassify_general_backlog(50, $deadline);
-        $language = backfill_language_batch(50, $deadline);
+        try {
+            $retag = retag_backlog_batch(500, $deadline);
+        } catch (Throwable $e) {
+            $errors[] = 'Validator sub-task (retag) failed: ' . $e->getMessage();
+        }
+
+        try {
+            $zeroTag = classify_zero_tag_backlog(50, $deadline);
+        } catch (Throwable $e) {
+            $errors[] = 'Validator sub-task (zero-tag rescue) failed: ' . $e->getMessage();
+        }
+
+        try {
+            $general = reclassify_general_backlog(50, $deadline);
+        } catch (Throwable $e) {
+            $errors[] = 'Validator sub-task (General-reclassify) failed: ' . $e->getMessage();
+        }
+
+        try {
+            $language = backfill_language_batch(50, $deadline);
+        } catch (Throwable $e) {
+            $errors[] = 'Validator sub-task (language backfill) failed: ' . $e->getMessage();
+        }
 
         $errors[] = "Validator: link-check checked {$linksChecked}, validated {$linksValidated}, removed {$itemsRemoved}; "
             . "reviewed {$retag['checked']} existing item(s), retagged {$retag['retagged']}, "
