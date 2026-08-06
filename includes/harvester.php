@@ -1829,6 +1829,7 @@ function run_validator(): array {
     $logId = (int) $logPdo->lastInsertId();
 
     ensure_harvest_log_links_validated_column();
+    ensure_items_validation_group_column();
 
     $linksChecked = 0;
     $linksValidated = 0;

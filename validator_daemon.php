@@ -65,6 +65,7 @@ if (!acquire_run_lock('validator', 1)) {
 
 ensure_harvest_log_validator_run_type();
 ensure_harvest_log_links_validated_column();
+ensure_items_validation_group_column();
 
 printf(
     "%s Validator daemon started (pid %d). pcntl hard-interrupt: %s.\n",
