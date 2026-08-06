@@ -773,12 +773,67 @@ function ensure_items_language_column(): void {
     set_setting('items_language_migrated', '1');
 }
 
+/**
+ * items.validation_group (0-5) -- same rotating-group idea as seed_urls'
+ * seed_group, applied to items so the validator daemon's link-health sweep
+ * covers the *entire* catalog roughly once an hour on a predictable
+ * schedule, rather than relying on ORDER BY RAND() sampling to eventually
+ * reach everything by chance. NULL until backfill_validation_groups_batch()
+ * (includes/harvester.php) assigns one to pre-existing items.
+ */
+function ensure_items_validation_group_column(): void {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+
+    if (get_setting('items_validation_group_migrated', '') === '1') {
+        return;
+    }
+
+    $exists = (int) db()->query(
+        "SELECT COUNT(*) FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'items' AND column_name = 'validation_group'"
+    )->fetchColumn();
+    if ($exists === 0) {
+        db()->exec('ALTER TABLE items ADD COLUMN validation_group TINYINT UNSIGNED DEFAULT NULL');
+        db()->exec('ALTER TABLE items ADD KEY idx_validation_group (validation_group, last_checked_at)');
+    }
+    set_setting('items_validation_group_migrated', '1');
+}
+
+/**
+ * Round-robin group assignment via a persistent cursor (settings table),
+ * same reasoning as assign_next_seed_group() in includes/harvester.php --
+ * id % 6 looked simpler but the same drift already confirmed for seeds
+ * applies here too (and items churn far more, both via harvest inserts and
+ * validator-driven deletions), so a cursor that only moves forward on
+ * actual new items keeps the 6 groups genuinely balanced. Called once, at
+ * insert time, from insert_item_if_new() -- covers every harvest path
+ * (API sources, crawler, manual add) since they all funnel through there.
+ */
+function assign_next_validation_group(int $itemId): void {
+    $cursor = (int) get_setting('validation_group_cursor', '0') % 6;
+    db()->prepare('UPDATE items SET validation_group = ? WHERE id = ?')->execute([$cursor, $itemId]);
+    set_setting('validation_group_cursor', (string) (($cursor + 1) % 6));
+}
+
+/**
+ * Which of the 6 groups is "due" right now -- a pure function of wall-clock
+ * time (10-minute windows), same fixed-mapping-not-config-driven approach
+ * as current_seed_group(). Every group gets a window once per hour:
+ * :00-:09 -> group 0, :10-:19 -> group 1, ... :50-:59 -> group 5.
+ */
+function current_validation_group(): int {
+    return intdiv((int) date('i'), 10) % 6;
+}
+
 function insert_item_if_new(array $fields, array $tagNames = []): ?int {
     if (is_junk_title($fields['title'] ?? '')) {
         return null;
     }
 
     ensure_items_language_column();
+    ensure_items_validation_group_column();
 
     // One captured connection for the whole operation — lastInsertId() is
     // only valid on the exact connection that did the INSERT, so this must
@@ -816,6 +871,10 @@ function insert_item_if_new(array $fields, array $tagNames = []): ?int {
     if ($itemId <= 0) {
         throw new RuntimeException('insert_item_if_new: lastInsertId() returned 0 after a successful insert — refusing to write item_tags against an invalid id.');
     }
+
+    // Every new item enters the validator's rotating 6-group schedule right
+    // away -- see assign_next_validation_group()'s own comment for why.
+    assign_next_validation_group($itemId);
 
     // 'general' (subjects.php) whenever nothing else applied -- no source
     // category, no seed subject, no classify_subjects() keyword match.

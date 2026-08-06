@@ -1205,10 +1205,49 @@ const LINK_FAILURE_THRESHOLD = 3;
  * flag a specific dead link directly (see report_broken_link.php) instead
  * of waiting on this to eventually sample it.
  */
+/**
+ * One-time backfill for items inserted before items.validation_group
+ * existed -- new items get a group immediately at insert time (see
+ * assign_next_validation_group() in includes/functions.php), this only
+ * catches the pre-existing backlog. Small id-ordered batches, same
+ * deadline-aware shape as the other backlog passes; naturally becomes a
+ * no-op forever once every item has a group.
+ */
+function backfill_validation_groups_batch(int $limit, ?float $deadline = null): array {
+    $stmt = db()->prepare('SELECT id FROM items WHERE validation_group IS NULL ORDER BY id ASC LIMIT ' . (int) $limit);
+    $stmt->execute();
+    $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    $assigned = 0;
+    foreach ($ids as $id) {
+        if ($deadline !== null && time_budget_exceeded($deadline)) break;
+        assign_next_validation_group((int) $id);
+        $assigned++;
+    }
+    return ['assigned' => $assigned];
+}
+
+/**
+ * Scoped to whichever of the 6 validation groups current_validation_group()
+ * says is "due" this hour (see includes/functions.php), not a random sample
+ * of the whole catalog -- guarantees every item's link gets re-checked on a
+ * predictable ~hourly cadence instead of leaving full coverage to chance.
+ * Within a group, oldest-checked-first (not random) so a group larger than
+ * one hour's worth of daemon iterations can process still converges to full
+ * coverage over successive hours rather than re-sampling the same items.
+ * Items not yet backfilled with a group (NULL) are included in every
+ * group's window so they don't wait for their own eventual assignment.
+ */
 function check_links_batch(int $limit = 8, ?float $deadline = null): array {
-    $rows = db()->query(
-        "SELECT id, url, failed_checks FROM items ORDER BY RAND() LIMIT " . (int)$limit
-    )->fetchAll();
+    $group = current_validation_group();
+    $stmt = db()->prepare(
+        "SELECT id, url, failed_checks FROM items
+         WHERE validation_group = ? OR validation_group IS NULL
+         ORDER BY (last_checked_at IS NULL) DESC, last_checked_at ASC
+         LIMIT " . (int) $limit
+    );
+    $stmt->execute([$group]);
+    $rows = $stmt->fetchAll();
 
     $checked = 0;
     $removed = 0;
@@ -1796,6 +1835,8 @@ function run_validator(): array {
     $itemsRemoved = 0;
     $errors = [];
     try {
+        $groupBackfill = backfill_validation_groups_batch(2000, $deadline);
+
         $linkCheck = check_links_batch(25, $deadline);
         $linksChecked = $linkCheck['checked'];
         $linksValidated = $linkCheck['validated'];
@@ -1811,7 +1852,8 @@ function run_validator(): array {
             . "rescued {$retag['rescued']} newly-zero-tag; zero-tag scan checked {$zeroTag['checked']}, "
             . "tagged {$zeroTag['tagged']}, fell back to General for {$zeroTag['fallback']}; "
             . "General-reclassify checked {$general['checked']}, upgraded {$general['upgraded']}; "
-            . "language backfill checked {$language['checked']}, detected {$language['detected']}.";
+            . "language backfill checked {$language['checked']}, detected {$language['detected']}; "
+            . "validation-group backfill assigned {$groupBackfill['assigned']}.";
     } catch (Throwable $e) {
         $errors[] = 'FATAL: ' . $e->getMessage();
     } finally {

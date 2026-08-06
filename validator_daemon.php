@@ -78,6 +78,7 @@ function validator_daemon_fresh_agg(): array {
         'zero_tag_checked' => 0, 'zero_tag_tagged' => 0, 'zero_tag_fallback' => 0,
         'general_checked' => 0, 'general_upgraded' => 0,
         'language_checked' => 0, 'language_detected' => 0,
+        'groups_backfilled' => 0,
     ];
 }
 
@@ -96,7 +97,8 @@ function validator_daemon_flush(array &$agg, string &$windowStart): void {
             . "zero-tag scan checked {$agg['zero_tag_checked']}, tagged {$agg['zero_tag_tagged']}, "
             . "fell back to General for {$agg['zero_tag_fallback']}; "
             . "General-reclassify checked {$agg['general_checked']}, upgraded {$agg['general_upgraded']}; "
-            . "language backfill checked {$agg['language_checked']}, detected {$agg['language_detected']}.",
+            . "language backfill checked {$agg['language_checked']}, detected {$agg['language_detected']}; "
+            . "validation-group backfill assigned {$agg['groups_backfilled']}.",
     ]);
     printf("%s Flushed summary to harvest_log.\n", date('Y-m-d H:i:s'));
     $agg = validator_daemon_fresh_agg();
@@ -112,6 +114,12 @@ while (!$shuttingDown) {
         // constantly rather than once per 5 minutes; small-and-frequent
         // adds up to the same throughput with far less exposed per hang.
         $iterationDeadline = microtime(true) + ITERATION_HARD_TIMEOUT_SECONDS - 3;
+
+        // Catches up any items still missing a validation_group (pre-
+        // existing catalog, before this column existed) -- cheap, pure-DB,
+        // fine to run every iteration; naturally becomes a no-op once done.
+        $groupBackfill = backfill_validation_groups_batch(200, $iterationDeadline);
+        $agg['groups_backfilled'] += $groupBackfill['assigned'];
 
         $linkCheck = check_links_batch(5, $iterationDeadline);
         $agg['links_checked'] += $linkCheck['checked'];
