@@ -785,55 +785,120 @@ function propose_seed(string $url, ?string $subjectSlug, string $discoverySource
  * rotation works, on its own (longer) cooldown — new sources don't appear
  * often enough to need hourly checking.
  */
-function discover_sources_openalex(int $max = 15): array {
+/**
+ * Rotation order for discover_sources_openalex()'s geography axis --
+ * 'global' (no country filter) keeps discovering the huge multi-
+ * disciplinary repositories/journals the original unfiltered ranking
+ * always found. Everything else exists because that global ranking
+ * structurally never reaches most of the world: works_count sorts a
+ * handful of US/UK mega-repositories to the very top, and pagination
+ * alone (see the page-cursor logic below) would take a very long time to
+ * dig past them country-by-country on pure luck.
+ *
+ * China/Japan/India/Germany/France/Italy/Canada/Australia are listed
+ * twice -- the rest of the world's top-10-by-total-research-output list
+ * (per user-supplied figures: US ~18M, China ~13M, UK ~5.4M, Germany
+ * ~4.6M, Japan ~3.8M, India ~3.75M, France ~3.1M, Italy ~2.9M, Canada
+ * ~2.7M, Australia ~2.3M documents) after excluding US/UK, which the
+ * unfiltered 'global' query already surfaces heavily -- so they come up
+ * in rotation about twice as often as the long tail. The long tail below
+ * is deliberately broad (every populated region, not just the biggest
+ * producers) since the ask was "go around the world", not just "cover
+ * the next few biggest countries".
+ */
+const OPENALEX_DISCOVERY_GEOGRAPHIES = [
+    'global',
+    'CN', 'JP', 'IN', 'DE', 'FR', 'IT', 'CA', 'AU',
+    'CN', 'JP', 'IN', 'DE', 'FR', 'IT', 'CA', 'AU',
+    'TW', 'KR', 'SG', 'ID', 'TH', 'VN', 'PH', 'MY', 'BD', 'PK',
+    'BR', 'MX', 'AR', 'CL', 'CO', 'PE',
+    'NG', 'ZA', 'KE', 'EG', 'GH', 'ET', 'MA',
+    'SA', 'AE', 'IL', 'TR', 'IR',
+    'PL', 'RU', 'UA', 'RO', 'GR', 'PT', 'NL', 'ES', 'SE', 'CH',
+    'NZ',
+];
+
+// How many (type, geography) combinations to sweep per call -- the
+// underlying source_ready() cooldown stays at once/24h (new sources don't
+// appear often enough to need more, and this stays polite to OpenAlex),
+// so this is the actual lever for covering the world faster: 5 combos/day
+// instead of 1 means the full type x geography cycle (2 x 57 = 114 combos)
+// takes about 23 days instead of 114.
+const OPENALEX_DISCOVERY_COMBOS_PER_RUN = 5;
+
+/**
+ * One (type, geography) slice: its own page cursor (so it also digs past
+ * page 1 over successive visits, not just the geography rotation alone),
+ * and a much lower works_count bar for country-scoped queries than the
+ * global one -- a single institution's repository legitimately has far
+ * fewer total works than a global mega-repository (confirmed: India's
+ * ATREE Digital Repository sits at 214, several legitimate regional
+ * journals sit under 200), and the original >5000/>1000 global threshold
+ * would exclude most of exactly what this rotation exists to find.
+ */
+function discover_openalex_combo(string $type, string $geography, int $maxPerCombo, string $contact): array {
+    $comboKey = "openalex_source_page_cursor_{$type}_{$geography}";
+    $page = max(1, (int) get_setting($comboKey, '1'));
+
+    $threshold = ($geography === 'global') ? 1000 : 20;
+    $filterStr = "type:{$type},works_count:>{$threshold}";
+    if ($geography !== 'global') {
+        $filterStr .= ",country_code:{$geography}";
+    }
+    $filter = urlencode($filterStr);
+
+    $perPage = $maxPerCombo * 3;
+    $body = safe_http_get("https://api.openalex.org/sources?filter={$filter}&sort=works_count:desc&per-page={$perPage}&page={$page}{$contact}");
+    if (!$body) return ['proposed' => 0, 'error' => "OpenAlex Sources request failed ({$type}/{$geography})"];
+
+    $data = json_decode($body, true);
+    $sources = $data['results'] ?? [];
+
+    // Ran off the end of this slice's ranked list -- wrap back to page 1
+    // rather than incrementing forever into guaranteed-empty pages; also
+    // means the top of each slice gets periodically re-visited, catching
+    // newly-added OpenAlex sources over time instead of a one-way march.
+    $nextPage = (count($sources) < $perPage) ? 1 : $page + 1;
+    set_setting($comboKey, (string) $nextPage);
+
+    $proposed = 0;
+    foreach ($sources as $source) {
+        if ($proposed >= $maxPerCombo) break;
+        $homepage = $source['homepage_url'] ?? null;
+        if (!$homepage || !filter_var($homepage, FILTER_VALIDATE_URL)) continue;
+        if (propose_seed($homepage, null, "openalex-sources-{$geography}")) $proposed++;
+    }
+    return ['proposed' => $proposed];
+}
+
+function discover_sources_openalex(int $maxPerCombo = 10): array {
     if (!source_ready('discover_sources_openalex', 24 * 3600)) {
         return ['proposed' => 0, 'skipped' => true];
     }
     mark_source_called('discover_sources_openalex');
 
     $types = ['repository', 'journal'];
-    $typeIndex = (int) get_setting('openalex_source_type_cursor', '0') % count($types);
-    $type = $types[$typeIndex];
-    set_setting('openalex_source_type_cursor', (string) (($typeIndex + 1) % count($types)));
-
-    // Per-type page cursor -- without this, every call re-fetches the exact
-    // same top-of-works_count slice forever. propose_seed() dedupes by host
-    // (seed_host_known()), so once that top slice is exhausted (a matter of
-    // days), every future run finds nothing new and proposes 0 permanently,
-    // never reaching page 2+ of OpenAlex's ~250k-entry index. Confirmed as
-    // the reason smaller/regional sources (Indian institutional repositories
-    // -- IITs/NITs/IIMs/IISc/central universities, East Asian sources, etc.)
-    // never got proposed: works_count ranks huge Western multi-disciplinary
-    // repositories/journals at the very top, so anything else sits well
-    // past page 1 and this function could structurally never get there.
-    $pageKey = "openalex_source_page_cursor_{$type}";
-    $page = max(1, (int) get_setting($pageKey, '1'));
-
+    $geographies = OPENALEX_DISCOVERY_GEOGRAPHIES;
+    $comboCount = count($types) * count($geographies);
     $contact = defined('CONTACT_EMAIL') ? '&mailto=' . urlencode(CONTACT_EMAIL) : '';
-    $filter = urlencode("type:{$type},works_count:>1000");
-    $perPage = $max * 3;
-    $body = safe_http_get("https://api.openalex.org/sources?filter={$filter}&sort=works_count:desc&per-page={$perPage}&page={$page}{$contact}");
-    if (!$body) return ['proposed' => 0, 'error' => 'OpenAlex Sources request failed'];
 
-    $data = json_decode($body, true);
-    $sources = $data['results'] ?? [];
-
-    // Ran off the end of the ranked list (fewer results than a full page,
-    // or none at all) -- wrap back to page 1 rather than incrementing
-    // forever into guaranteed-empty pages. Also means the top of the list
-    // gets periodically re-visited, catching newly-added OpenAlex sources
-    // over time instead of only ever moving forward once.
-    $nextPage = (count($sources) < $perPage) ? 1 : $page + 1;
-    set_setting($pageKey, (string) $nextPage);
-
+    $comboCursor = (int) get_setting('openalex_source_combo_cursor', '0') % $comboCount;
     $proposed = 0;
-    foreach ($sources as $source) {
-        if ($proposed >= $max) break;
-        $homepage = $source['homepage_url'] ?? null;
-        if (!$homepage || !filter_var($homepage, FILTER_VALIDATE_URL)) continue;
-        if (propose_seed($homepage, null, 'openalex-sources')) $proposed++;
+    $errors = [];
+    $combosRun = [];
+    for ($i = 0; $i < OPENALEX_DISCOVERY_COMBOS_PER_RUN; $i++) {
+        $index = ($comboCursor + $i) % $comboCount;
+        $type = $types[intdiv($index, count($geographies))];
+        $geography = $geographies[$index % count($geographies)];
+
+        $result = discover_openalex_combo($type, $geography, $maxPerCombo, $contact);
+        $proposed += $result['proposed'];
+        if (!empty($result['error'])) $errors[] = $result['error'];
+        $combosRun[] = "{$type}/{$geography}";
     }
-    return ['proposed' => $proposed, 'page' => $page];
+    set_setting('openalex_source_combo_cursor', (string) (($comboCursor + OPENALEX_DISCOVERY_COMBOS_PER_RUN) % $comboCount));
+
+    return ['proposed' => $proposed, 'combos' => $combosRun, 'errors' => $errors];
 }
 
 /**
@@ -865,7 +930,15 @@ function maybe_flag_hub_candidate(string $url, string $body, bool $hostIsNew): v
 
 function discover_new_seeds(): array {
     $openalex = discover_sources_openalex();
-    return ['proposed' => $openalex['proposed'] ?? 0, 'errors' => array_filter([$openalex['error'] ?? null])];
+    $errors = $openalex['errors'] ?? [];
+    if (!empty($openalex['combos'])) {
+        // Informational, not an error -- count_real_errors() (includes/
+        // harvester.php) already knows to skip lines like this, same as
+        // the validator's own summary line, so it shows in harvest_log's
+        // detail without inflating the run's error count.
+        $errors[] = 'Discovery swept: ' . implode(', ', $openalex['combos']) . '.';
+    }
+    return ['proposed' => $openalex['proposed'] ?? 0, 'errors' => $errors];
 }
 
 // ---- Bounded crawl: seed hubs -> crawl_queue -> items -----------------
@@ -1599,6 +1672,7 @@ function count_real_errors(array $errors): int {
         'Tag cleanup:',
         'Skipped: a previous validator run',
         'Validator:',
+        'Discovery swept:',
     ];
     return count(array_filter($errors, function ($e) use ($noticePrefixes) {
         foreach ($noticePrefixes as $prefix) {
