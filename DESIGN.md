@@ -196,13 +196,37 @@ for the crawler above to eventually work from. `discover_new_seeds()` in
 1. **`discover_sources_openalex()`** — the primary mechanism. Queries
    OpenAlex's own curated Sources index (`api.openalex.org/sources`,
    ~250k journals/repositories/preprint servers, free, no key) for
-   established sources (`works_count > 5000`) we don't already have a seed
-   on. This is *vetted* discovery — every proposal is a real, well-known
-   repository (Zenodo, SSRN, HAL, DOAJ, RePEc, ...), not a guess. Rotates
-   through source types (`repository`, `journal`) across runs; own 24-hour
-   cooldown via the same `source_ready()`/`mark_source_called()` mechanism
-   as the content sources in §4.1, since new sources don't appear often
-   enough to need hourly checking.
+   established sources we don't already have a seed on. This is *vetted*
+   discovery — every proposal is a real, well-known repository (Zenodo,
+   SSRN, HAL, DOAJ, RePEc, ...), not a guess. Own 24-hour cooldown via the
+   same `source_ready()`/`mark_source_called()` mechanism as the content
+   sources in §4.1, since new sources don't appear often enough to need
+   hourly checking.
+
+   Rotates through `(type, geography)` combinations — `type` is
+   `repository`/`journal`; `geography` is `'global'` (unfiltered) plus
+   ~57 country codes via OpenAlex's own `country_code` filter, weighted
+   toward the world's top research-producing countries by total output
+   (China/Japan/India/Germany/France/Italy/Canada/Australia appear twice
+   in the rotation; US/UK are deliberately absent from the explicit list
+   since the unfiltered `'global'` query already surfaces them heavily
+   via `works_count` ranking) with a long tail covering the rest of the
+   world (Southeast Asia, Latin America, Africa, Middle East, Eastern
+   Europe, Oceania). `OPENALEX_DISCOVERY_COMBOS_PER_RUN` (5) combos are
+   swept per call — the actual throughput lever, since the 24h cooldown
+   is unaffected by cron frequency. Each combo keeps its own page cursor
+   (`openalex_source_page_cursor_{type}_{geography}` in `settings`),
+   wrapping back to page 1 once a page returns fewer than a full page's
+   worth of results — without this, `propose_seed()`'s host-dedupe means
+   the exact same top-of-ranking slice gets re-fetched forever and
+   nothing past page 1 is ever reached. Country-scoped queries use a much
+   lower `works_count` floor (`>20`) than the global query (`>1000`) — a
+   single institution's repository legitimately has far fewer total
+   works than a global mega-repository. Confirmed via the live API this
+   genuinely surfaces sources the un-paginated, ungeography-scoped
+   original version structurally never could (Japan's NII institutional
+   repository aggregator, India's Shodhganga, several Chinese university
+   repositories) in a single test run.
 2. **`maybe_flag_hub_candidate()`** — the organic complement, called from
    inside `process_queue_batch()` (§4.2 step 4) since it reuses the page
    body already fetched for metadata, no extra request. If a page's host
@@ -219,13 +243,13 @@ faster, not from trusting arbitrary new domains automatically.
 
 ### 4.2.2 Link health
 
-Every harvest run reachability-checks a random sample (not a FIFO queue,
-so there's no backlog that outgrows the catalog as it grows) of existing
-items' URLs (`check_links_batch()`) and removes ones that are truly dead.
-`check_url_status()` sends `HEAD` first (cheaper), retrying with a ranged
-`GET` whenever `HEAD` comes back as any kind of error — not just a hard
-connection failure. That retry condition used to be narrower (only a
-connection failure, `code === 0`), and it mattered: confirmed in
+Link-health checking lives in the continuous validator (§4.5), not
+`harvest.php` — `check_links_batch()` reachability-checks a slice of
+existing items' URLs every daemon iteration and removes ones that are
+truly dead. `check_url_status()` sends `HEAD` first (cheaper), retrying
+with a ranged `GET` whenever `HEAD` comes back as any kind of error — not
+just a hard connection failure. That retry condition used to be narrower
+(only a connection failure, `code === 0`), and it mattered: confirmed in
 production, a WordPress/OpenEdition-hosted page
 (`archivalia.hypotheses.org`) returned a 404 to `HEAD` while the exact same
 URL returned 200 with real content on `GET`. Every failure code, 404/410
@@ -236,6 +260,32 @@ far fewer wrongful deletions of live pages that got blocked or misbehaved
 once. Readers can also flag a specific link directly
 (`report_broken_link.php`, no login) — it re-verifies before acting rather
 than trusting the report blindly.
+
+Which items get checked each pass isn't a random sample anymore —
+`items.validation_group` (0-5), assigned round-robin at insert time,
+combined with `current_validation_group()` (wall-clock minute → group,
+10-minute windows) means the *entire* catalog gets a link-health pass on
+a predictable ~hourly cadence, not merely "probably eventually" the way
+pure `ORDER BY RAND()` sampling only statistically approached. Within a
+group, oldest-`last_checked_at`-first so a group too large to fully
+process in one hour's daemon iterations still converges over successive
+hours rather than re-sampling the same rows. `backfill_validation_groups_batch()`
+catches up items that predate this column.
+
+**Seed failures follow the same "don't mistake transient for broken"
+principle, on a longer timescale.** A seed is only crawled ~once/hour
+(its own `seed_group`'s turn), so a raw attempt-count threshold alone
+could disable a seed after as little as ~3 hours of being down — a
+maintenance window at a bad time of day, not a genuinely broken source.
+`seed_urls.first_failed_at` tracks when the current consecutive-failure
+streak began; `disable_seed_after_failure()` now fires only once BOTH
+`SEED_FAILURE_THRESHOLD` (3) attempts *and* `SEED_FAILURE_MIN_DAYS` (3
+elapsed days) have passed (`seed_should_disable()`). Reset to `NULL`
+alongside `failed_fetches` on any success, reactivation, or manual
+re-enable. `SEED_PERMANENT_DISABLE_CYCLES` (7 cycles to permanent
+disable, unchanged) now takes roughly a month of sustained failure
+instead of ~1 week as a result, since each cycle is bounded below by 3
+days instead of ~3 hours.
 
 ### 4.3 Scheduling
 
@@ -302,6 +352,56 @@ entirely. The fix is a subject-line marker (`[fdbk]`) the widget sets and
 the poller explicitly checks for — mark as seen, skip, no issue — rather
 than two channels that happen to coexist by accident.
 
+### 4.5 Continuous validator
+
+Tag correction, zero-tag rescue, `General`-tag reclassification, language
+backfill, and link health (§4.2.2) all run as a single long-lived process,
+`validator_daemon.php` — not a cron batch like harvest/discovery. This is
+the one exception to the "page request or short-lived cron invocation"
+pattern described in §1: SSH access turned out to be available, making a
+genuinely continuous process possible, and the earlier cron-batched
+version (still available as
+`validator.php`/`run_validator()` for the admin "Run validator now" button
+and hosts without SSH) kept getting silently killed mid-run in
+production — confirmed via `ps aux` showing no live process despite
+`harvest_log` still reading "running…" — most likely a blocking DNS
+resolution that neither `CURLOPT_TIMEOUT` nor PHP's `set_time_limit()`
+can preempt, only a real signal can.
+
+**Loop shape:** `while (!$shuttingDown) { ...small bounded slice of each
+sub-task...; sleep(5); }`. Each iteration is wrapped in a hard
+`pcntl_alarm()` interrupt (a `SIGALRM` handler that throws), not just the
+soft `time_budget_exceeded()` deadline check every batch function already
+has — confirmed as the mechanism actually needed, since the soft check
+alone couldn't stop the production hangs described above. Falls back to
+best-effort if the `pcntl` extension isn't loaded.
+
+**Each of the 6 sub-tasks (validation-group backfill, link-check, retag,
+zero-tag rescue, General-reclassify, language backfill) runs in its own
+try/catch**, not one shared try/catch for the whole iteration — confirmed
+in production that a failure early in the sequence (a migration-ordering
+bug in `check_links_batch()`) silently skipped every task after it,
+including totally unrelated ones like General-reclassify, for as long as
+that bug was live. One bad sub-task should never be able to starve five
+healthy ones. `run_validator()` (the batch fallback) mirrors this with the
+same per-sub-task isolation.
+
+Stats aggregate across iterations and flush to one `harvest_log` summary
+row every 5 minutes, not one row per few-second iteration — the same
+run-locking (`acquire_run_lock('validator', 1)`, refreshed as a heartbeat
+every iteration) and stale-run self-healing (`mark_stale_runs_as_crashed()`)
+as the cron-based jobs, so the display never gets stuck reading "running…"
+after a genuine crash.
+
+**Since a persistent process doesn't survive a host reboot or resource-limit
+kill the way a fresh cron invocation does**, `bin/validator_watchdog.sh`
+(cron, every 10 minutes, called via `/bin/sh <path>` rather than executing
+the script path directly — plain FTP deploys don't reliably preserve the
+executable bit) does a cheap `pgrep -f validator_daemon.php` check and
+restarts it if it's not running. Confirmed necessary in practice: a
+scheduled host reboot killed the daemon, and it needed exactly this
+watchdog to come back without manual intervention.
+
 ## 5. Indexing / search-performance plan
 
 The browse/search UI (`index.php`) already does two things per request:
@@ -358,20 +458,27 @@ hosts            host (PK), robots_rules, robots_fetched_at,
                   crawl_delay_seconds, last_crawled_at, disallowed
 seed_urls         id, url, subject_slug, seed_group, active, added_at,
                   last_crawled_at, successful_fetches, failed_fetches,
+                  first_failed_at (self-migrated — see
+                  ensure_seed_urls_first_failed_at_column(), §4.2.2),
                   block_cycles, permanently_disabled
 crawl_queue       id, url, url_hash (unique), host, subject_slug,
                   status(pending/done/skipped/error), discovered_at,
                   processed_at, error
 harvest_log       id, started_at, finished_at, run_type
-                  (harvest/discovery/feedback), items_added,
-                  links_discovered, errors, detail
+                  (harvest/discovery/feedback/validator), items_added,
+                  links_discovered, links_checked, links_validated
+                  (self-migrated — see
+                  ensure_harvest_log_links_validated_column()),
+                  items_removed, errors, detail
 subjects          id, slug (unique), label, parent, keywords —
                   self-migrated + self-seeded from includes/subjects.php
                   on first use (see §4.1); live source of truth from then on
 items             + url_hash CHAR(64) UNIQUE, + idx_added_at,
                   + content_type ENUM(research/video), + language VARCHAR(8)
                   (self-migrated the same way as `subjects` — see
-                  ensure_items_language_column())
+                  ensure_items_language_column()), + validation_group
+                  TINYINT (0-5, self-migrated — see
+                  ensure_items_validation_group_column(), §4.2.2/§4.5)
 item_tags         + idx_tag_id
 ```
 

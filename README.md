@@ -24,9 +24,13 @@ architecture writeup.
 - **Bounded, polite crawler** — seeded from curated hub/listing pages,
   respects `robots.txt` (checked at both discovery and fetch time) and
   per-host crawl-delay, never an open-ended crawl of arbitrary sites
-- **Source discovery** — proposes new crawler seeds by mining OpenAlex's own
-  repository index and flagging listing-like pages the crawler encounters on
-  domains it's never touched before; every proposal waits for admin review
+- **Global source discovery** — proposes new crawler seeds by mining
+  OpenAlex's own repository/journal index (rotating across ~57
+  countries/regions, not just globally-top-ranked sources, so it actually
+  reaches regional and institutional repositories rather than only the
+  handful of huge multi-disciplinary ones), plus flagging listing-like
+  pages the crawler encounters on domains it's never touched before;
+  every proposal waits for admin review
 - **Manual add/edit** — a fallback path, not the normal workflow; one-click
   metadata auto-fetch from a pasted URL (arXiv/PubMed/Crossref-aware, generic
   OpenGraph/meta-tag extraction otherwise), with an option to add the URL as
@@ -94,13 +98,20 @@ architecture writeup.
   under high harvest volume the way a fixed cron cadence eventually would.
   Each slice runs under a hard `pcntl_alarm()` interrupt, not just a soft
   deadline check, so one hung network call can't wedge the whole process
-- **Random-sample link health checks** — dead links get pruned automatically,
-  but only after a consistent 3-strikes grace period for *every* failure
-  code, 404/410 included, and a HEAD-request failure is always confirmed
-  with a real GET before being trusted — some servers (WordPress/OpenEdition-
-  hosted sites, confirmed in production) reject HEAD specifically while the
-  page is genuinely live on GET. Sampling instead of a FIFO queue so
-  there's no backlog that outgrows the catalog
+- **Rotating link health checks** — every item gets a link-health pass on
+  a predictable ~hourly cadence (6 rotating groups, 10-minute windows,
+  not random sampling that only statistically approaches full coverage),
+  but a link only gets removed after a consistent 3-strikes grace period
+  for *every* failure code, 404/410 included, and a HEAD-request failure
+  is always confirmed with a real GET before being trusted — some servers
+  (WordPress/OpenEdition-hosted sites, confirmed in production) reject
+  HEAD specifically while the page is genuinely live on GET
+- **Seeds get 3 days, not 3 hours, before being written off** — a seed is
+  only crawled ~once/hour, so a raw attempt-count threshold alone could
+  disable one after a single bad afternoon; disabling now requires both
+  enough failed attempts *and* that the failure streak has actually run
+  for 3 elapsed days, so a transient host outage doesn't get mistaken for
+  a genuinely broken source
 - **No orphaned tags** — deleting an item, correcting a tag typo, or
   reconciling a mistag prunes any tag left with zero items as part of the
   same operation, not a deferred cleanup job
