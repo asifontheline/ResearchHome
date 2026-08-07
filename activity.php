@@ -1,12 +1,14 @@
 <?php
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/harvester.php'; // ensure_seed_urls_first_failed_at_column()
 
 // Enable/disable is the one action available right on this public page,
 // and only when logged in -- everything else (add/approve/delete) stays
 // on seeds.php. Guarded the same way seeds.php guards its own POSTs.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggle_seed') {
     require_login();
+    ensure_seed_urls_first_failed_at_column();
     $id = (int)($_POST['id'] ?? 0);
     $current = db()->prepare('SELECT active FROM seed_urls WHERE id = ?');
     $current->execute([$id]);
@@ -17,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggl
     if ($wasActive) {
         db()->prepare('UPDATE seed_urls SET active = 0 WHERE id = ?')->execute([$id]);
     } else {
-        db()->prepare('UPDATE seed_urls SET active = 1, failed_fetches = 0, block_cycles = 0, permanently_disabled = 0 WHERE id = ?')->execute([$id]);
+        db()->prepare('UPDATE seed_urls SET active = 1, failed_fetches = 0, first_failed_at = NULL, block_cycles = 0, permanently_disabled = 0 WHERE id = ?')->execute([$id]);
     }
     header('Location: /activity.php#seeds');
     exit;

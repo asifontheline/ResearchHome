@@ -947,10 +947,63 @@ function discover_new_seeds(): array {
  * A seed that fails repeatedly (e.g. behind bot-protection like AWS WAF —
  * something a polite crawler correctly can't and shouldn't try to bypass)
  * would otherwise error on every single run forever. Past this many
- * consecutive failures it's auto-disabled instead, same pattern as
+ * consecutive failures -- AND past SEED_FAILURE_MIN_DAYS elapsed, see its
+ * own comment -- it's auto-disabled instead, same pattern as
  * LINK_FAILURE_THRESHOLD for dead item links.
  */
 const SEED_FAILURE_THRESHOLD = 3;
+
+/**
+ * A seed is only crawled ~once/hour (its own seed_group's turn comes up
+ * once per hour, see current_seed_group()) -- SEED_FAILURE_THRESHOLD
+ * alone (a raw attempt count) could disable a seed after as little as
+ * ~3 hours of being down, easily triggered by a transient outage or a
+ * maintenance window landing at a bad time of day rather than a
+ * genuinely broken source. Disabling now requires BOTH at least
+ * SEED_FAILURE_THRESHOLD failed attempts AND that the *current* failure
+ * streak (seed_urls.first_failed_at) has been running this many days --
+ * see seed_should_disable().
+ */
+const SEED_FAILURE_MIN_DAYS = 3;
+
+/**
+ * seed_urls.first_failed_at -- when the current consecutive-failure
+ * streak started; NULL while a seed has zero consecutive failures, reset
+ * on every success or reactivation. Self-migrating since this column
+ * postdates the original schema.
+ */
+function ensure_seed_urls_first_failed_at_column(): void {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+
+    if (get_setting('seed_urls_first_failed_at_migrated', '') === '1') {
+        return;
+    }
+
+    $exists = (int) db()->query(
+        "SELECT COUNT(*) FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'seed_urls' AND column_name = 'first_failed_at'"
+    )->fetchColumn();
+    if ($exists === 0) {
+        db()->exec('ALTER TABLE seed_urls ADD COLUMN first_failed_at DATETIME DEFAULT NULL');
+    }
+    set_setting('seed_urls_first_failed_at_migrated', '1');
+}
+
+/**
+ * See SEED_FAILURE_MIN_DAYS's own comment for why this is elapsed-time-
+ * gated, not just attempt-count-gated. $firstFailedAt null (streak start
+ * unknown -- shouldn't normally happen once a failure has been recorded,
+ * but a defensive default) means "don't disable yet", not "disable
+ * immediately" -- erring toward patience matches the reason this exists.
+ */
+function seed_should_disable(int $failures, ?string $firstFailedAt): bool {
+    if ($failures < SEED_FAILURE_THRESHOLD) return false;
+    if (!$firstFailedAt) return false;
+    $elapsedDays = (time() - strtotime($firstFailedAt)) / 86400;
+    return $elapsedDays >= SEED_FAILURE_MIN_DAYS;
+}
 
 /**
  * Auto-disabled is not permanent — a seed can fail 3x for a transient
@@ -969,10 +1022,13 @@ const SEED_COOLDOWN_HOURS = 24;
  * forever with no exit, for a site that's genuinely, persistently
  * bot-protected (ScienceDirect, Science, JAMA — confirmed on production,
  * these block on every attempt). Past this many consecutive cycles with
- * zero successes between them (~1 week, since each cycle is bounded by
- * SEED_COOLDOWN_HOURS), stop retrying entirely — see
+ * zero successes between them, stop retrying entirely — see
  * disable_seed_after_failure(). Only a manual re-enable in seeds.php
- * clears permanently_disabled.
+ * clears permanently_disabled. Each cycle is now at least SEED_FAILURE_
+ * MIN_DAYS + (SEED_COOLDOWN_HOURS/24) days (was ~1 day before that
+ * elapsed-time gate existed), so this is roughly a month of sustained
+ * failure with zero successes before giving up entirely, not ~1 week --
+ * deliberately patient, matching why the elapsed-time gate exists at all.
  */
 const SEED_PERMANENT_DISABLE_CYCLES = 7;
 
@@ -993,9 +1049,12 @@ function disable_seed_after_failure(int $seedId, int $failures): void {
 }
 
 function reactivate_cooled_down_seeds(): int {
+    // first_failed_at reset alongside failed_fetches -- a seed reactivated
+    // after cooldown gets a genuinely fresh streak if it fails again,
+    // rather than inheriting a stale timestamp from before the cooldown.
     $stmt = db()->prepare(
         "UPDATE seed_urls
-         SET active = 1, failed_fetches = 0
+         SET active = 1, failed_fetches = 0, first_failed_at = NULL
          WHERE active = 0 AND discovered = 0 AND permanently_disabled = 0
            AND failed_fetches >= ?
            AND last_crawled_at < DATE_SUB(NOW(), INTERVAL ? HOUR)"
@@ -1036,6 +1095,7 @@ function assign_next_seed_group(int $seedId): void {
 }
 
 function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
+    ensure_seed_urls_first_failed_at_column();
     reactivate_cooled_down_seeds();
 
     $group = current_seed_group();
@@ -1063,22 +1123,27 @@ function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
 
             if (!$body) {
                 $failures = (int) $seed['failed_fetches'] + 1;
-                if ($failures >= SEED_FAILURE_THRESHOLD) {
+                // Fresh streak (this seed's previous failed_fetches was 0)
+                // starts the clock now; an ongoing streak keeps its
+                // original start time -- see SEED_FAILURE_MIN_DAYS.
+                $firstFailedAt = ((int) $seed['failed_fetches'] === 0) ? date('Y-m-d H:i:s') : $seed['first_failed_at'];
+                if (seed_should_disable($failures, $firstFailedAt)) {
                     disable_seed_after_failure((int)$seed['id'], $failures);
                     $cyclesNow = (int) db()->query('SELECT block_cycles FROM seed_urls WHERE id = ' . (int)$seed['id'])->fetchColumn();
                     $permNote = $cyclesNow >= SEED_PERMANENT_DISABLE_CYCLES
                         ? " — {$cyclesNow} consecutive block cycles, permanently disabled (re-enable in seeds.php to retry)"
                         : " — auto-disabled, cycle {$cyclesNow}/" . SEED_PERMANENT_DISABLE_CYCLES . " (likely bot-protected or unreachable; retries automatically in " . SEED_COOLDOWN_HOURS . "h)";
-                    $errors[] = "seed {$seed['id']} ({$seed['url']}) fetch failed {$failures}x{$permNote}";
+                    $errors[] = "seed {$seed['id']} ({$seed['url']}) fetch failed {$failures}x over " . SEED_FAILURE_MIN_DAYS . "+ days{$permNote}";
                 } else {
-                    db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ? WHERE id = ?')
-                        ->execute([$failures, $seed['id']]);
-                    $errors[] = "seed {$seed['id']} ({$seed['url']}) fetch failed ({$failures}/" . SEED_FAILURE_THRESHOLD . ")";
+                    db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ?, first_failed_at = ? WHERE id = ?')
+                        ->execute([$failures, $firstFailedAt, $seed['id']]);
+                    $daysFailing = round((time() - strtotime($firstFailedAt)) / 86400, 1);
+                    $errors[] = "seed {$seed['id']} ({$seed['url']}) fetch failed ({$failures} attempts, {$daysFailing}/" . SEED_FAILURE_MIN_DAYS . " days)";
                 }
                 continue;
             }
 
-            db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = 0, successful_fetches = successful_fetches + 1, block_cycles = 0 WHERE id = ?')->execute([$seed['id']]);
+            db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = 0, first_failed_at = NULL, successful_fetches = successful_fetches + 1, block_cycles = 0 WHERE id = ?')->execute([$seed['id']]);
 
             $links = extract_links($body, $seed['url']);
             // Filters against robots.txt for hosts we already have cached
@@ -1153,11 +1218,12 @@ function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
             // other failure does.
             try {
                 $failures = (int) $seed['failed_fetches'] + 1;
-                if ($failures >= SEED_FAILURE_THRESHOLD) {
+                $firstFailedAt = ((int) $seed['failed_fetches'] === 0) ? date('Y-m-d H:i:s') : $seed['first_failed_at'];
+                if (seed_should_disable($failures, $firstFailedAt)) {
                     disable_seed_after_failure((int)$seed['id'], $failures);
                 } else {
-                    db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ? WHERE id = ?')
-                        ->execute([$failures, $seed['id']]);
+                    db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ?, first_failed_at = ? WHERE id = ?')
+                        ->execute([$failures, $firstFailedAt, $seed['id']]);
                 }
             } catch (Throwable $e2) {
                 // Even the reconnect+update attempt failed; move on rather

@@ -3,6 +3,7 @@ require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/harvester.php'; // assign_next_seed_group()
 require_login();
+ensure_seed_urls_first_failed_at_column();
 
 $subjects = get_subjects();
 $errors = [];
@@ -43,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($wasActive) {
             db()->prepare('UPDATE seed_urls SET active = 0 WHERE id = ?')->execute([$id]);
         } else {
-            db()->prepare('UPDATE seed_urls SET active = 1, failed_fetches = 0, block_cycles = 0, permanently_disabled = 0 WHERE id = ?')->execute([$id]);
+            db()->prepare('UPDATE seed_urls SET active = 1, failed_fetches = 0, first_failed_at = NULL, block_cycles = 0, permanently_disabled = 0 WHERE id = ?')->execute([$id]);
         }
     } elseif ($action === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
@@ -127,7 +128,12 @@ require __DIR__ . '/includes/header.php';
         <td><?= $s['active'] ? 'yes' : 'no' ?></td>
         <td><?= h($s['last_crawled_at'] ?? 'never') ?></td>
         <td><?= (int)$s['successful_fetches'] ?></td>
-        <td><?= (int)$s['failed_fetches'] ?><?= (int)$s['failed_fetches'] >= 3 && !$s['active'] ? ' — auto-disabled' : '' ?></td>
+        <td>
+          <?= (int)$s['failed_fetches'] ?><?= (int)$s['failed_fetches'] >= 3 && !$s['active'] ? ' — auto-disabled' : '' ?>
+          <?php if ($s['first_failed_at'] && $s['active']): ?>
+            <span class="muted">(failing <?= round((time() - strtotime($s['first_failed_at'])) / 86400, 1) ?>/<?= SEED_FAILURE_MIN_DAYS ?> days)</span>
+          <?php endif; ?>
+        </td>
         <td>
           <?php if ($s['permanently_disabled']): ?>
             <strong><?= (int)$s['block_cycles'] ?>/7 — permanently disabled</strong>

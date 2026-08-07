@@ -103,9 +103,10 @@ CREATE TABLE IF NOT EXISTS seed_urls (
     seed_group TINYINT UNSIGNED DEFAULT NULL,   -- 0-3, which 15-min cron slot crawls this seed (see current_seed_group() in harvester.php); assigned round-robin at add/approve time, not derived from id (id % 4 drifts uneven once seeds get deleted)
     added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_crawled_at DATETIME DEFAULT NULL,
-    failed_fetches TINYINT UNSIGNED NOT NULL DEFAULT 0, -- auto-disabled past SEED_FAILURE_THRESHOLD (harvester.php)
+    failed_fetches TINYINT UNSIGNED NOT NULL DEFAULT 0, -- auto-disabled past SEED_FAILURE_THRESHOLD attempts AND SEED_FAILURE_MIN_DAYS elapsed (harvester.php)
+    first_failed_at DATETIME DEFAULT NULL,      -- when the current consecutive-failure streak started; NULL while failed_fetches is 0 -- see ensure_seed_urls_first_failed_at_column() in harvester.php (self-migrating, this line is for fresh installs only)
     successful_fetches INT UNSIGNED NOT NULL DEFAULT 0, -- cumulative count, never resets (unlike failed_fetches, which resets to 0 on the next success)
-    block_cycles TINYINT UNSIGNED NOT NULL DEFAULT 0,   -- consecutive disable-then-reactivate-then-fail-again cycles with zero successes between them; each cycle is ~1 day (bounded by SEED_COOLDOWN_HOURS), so this is "consecutive days blocked". Reset to 0 on any success. Past SEED_PERMANENT_DISABLE_CYCLES, stops getting reactivated at all.
+    block_cycles TINYINT UNSIGNED NOT NULL DEFAULT 0,   -- consecutive disable-then-reactivate-then-fail-again cycles with zero successes between them; each cycle is now at least SEED_FAILURE_MIN_DAYS + SEED_COOLDOWN_HOURS/24 days (was ~1 day before the elapsed-time gate on disabling existed). Reset to 0 on any success. Past SEED_PERMANENT_DISABLE_CYCLES, stops getting reactivated at all.
     permanently_disabled TINYINT(1) NOT NULL DEFAULT 0, -- past block_cycles threshold — reactivate_cooled_down_seeds() will never touch this again; only a manual re-enable in seeds.php clears it
     UNIQUE KEY uniq_url (url(255)),
     KEY idx_host (host),
