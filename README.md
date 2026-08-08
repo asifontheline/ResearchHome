@@ -25,11 +25,13 @@ architecture writeup.
   respects `robots.txt` (checked at both discovery and fetch time) and
   per-host crawl-delay, never an open-ended crawl of arbitrary sites
 - **Global source discovery** — proposes new crawler seeds by mining
-  OpenAlex's own repository/journal index (rotating across ~57
-  countries/regions, not just globally-top-ranked sources, so it actually
-  reaches regional and institutional repositories rather than only the
-  handful of huge multi-disciplinary ones), plus flagging listing-like
-  pages the crawler encounters on domains it's never touched before;
+  OpenAlex's own repository/journal index (rotating across ~61
+  countries/regions rather than just globally-top-ranked sources, so it
+  actually reaches regional and institutional repositories, not only a
+  handful of huge multi-disciplinary ones — weighted toward the world's
+  top-10 research-producing countries by total output, in rank order),
+  plus flagging listing-like pages the crawler encounters on domains it's
+  never touched before;
   every proposal waits for admin review
 - **Manual add/edit** — a fallback path, not the normal workflow; one-click
   metadata auto-fetch from a pasted URL (arXiv/PubMed/Crossref-aware, generic

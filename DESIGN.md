@@ -204,17 +204,22 @@ for the crawler above to eventually work from. `discover_new_seeds()` in
    hourly checking.
 
    Rotates through `(type, geography)` combinations — `type` is
-   `repository`/`journal`; `geography` is `'global'` (unfiltered) plus
-   ~57 country codes via OpenAlex's own `country_code` filter, weighted
-   toward the world's top research-producing countries by total output
-   (China/Japan/India/Germany/France/Italy/Canada/Australia appear twice
-   in the rotation; US/UK are deliberately absent from the explicit list
-   since the unfiltered `'global'` query already surfaces them heavily
-   via `works_count` ranking) with a long tail covering the rest of the
-   world (Southeast Asia, Latin America, Africa, Middle East, Eastern
-   Europe, Oceania). `OPENALEX_DISCOVERY_COMBOS_PER_RUN` (5) combos are
-   swept per call — the actual throughput lever, since the 24h cooldown
-   is unaffected by cron frequency. Each combo keeps its own page cursor
+   `repository`/`journal`; `geography` is `'global'` (unfiltered,
+   captures international/borderless repositories like Zenodo/SSRN that
+   OpenAlex doesn't attribute to one country) plus ~61 country codes via
+   OpenAlex's own `country_code` filter. Explicitly ordered and weighted
+   by the world's top-10 countries by total research output (US, China,
+   UK, Germany, Japan, India, France, Italy, Canada, Australia, in that
+   rank order) — US/China (far ahead of everyone else) appear 3x, the
+   rest of the top 10 appear 2x each, preserving their relative rank
+   order — with a long tail covering the rest of the world (Southeast
+   Asia, Latin America, Africa, Middle East, Eastern Europe, Oceania) at
+   1x. Since combos advance via a monotonic cursor through this ordered
+   array, a country's position controls both how soon it's first reached
+   and how often it recurs each cycle — both reinforce priority, not just
+   frequency. `OPENALEX_DISCOVERY_COMBOS_PER_RUN` (5) combos are swept
+   per call — the actual throughput lever, since the 24h cooldown is
+   unaffected by cron frequency. Each combo keeps its own page cursor
    (`openalex_source_page_cursor_{type}_{geography}` in `settings`),
    wrapping back to page 1 once a page returns fewer than a full page's
    worth of results — without this, `propose_seed()`'s host-dedupe means

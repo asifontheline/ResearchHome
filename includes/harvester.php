@@ -786,30 +786,41 @@ function propose_seed(string $url, ?string $subjectSlug, string $discoverySource
  * often enough to need hourly checking.
  */
 /**
- * Rotation order for discover_sources_openalex()'s geography axis --
- * 'global' (no country filter) keeps discovering the huge multi-
- * disciplinary repositories/journals the original unfiltered ranking
- * always found. Everything else exists because that global ranking
- * structurally never reaches most of the world: works_count sorts a
- * handful of US/UK mega-repositories to the very top, and pagination
- * alone (see the page-cursor logic below) would take a very long time to
- * dig past them country-by-country on pure luck.
+ * Rotation order for discover_sources_openalex()'s geography axis,
+ * ordered and weighted by the world's top-10 countries by total research
+ * output (per user-supplied figures): US ~17.97M, China ~13.09M, UK
+ * ~5.41M, Germany ~4.58M, Japan ~3.79M, India ~3.75M, France ~3.06M,
+ * Italy ~2.89M, Canada ~2.74M, Australia ~2.29M documents.
  *
- * China/Japan/India/Germany/France/Italy/Canada/Australia are listed
- * twice -- the rest of the world's top-10-by-total-research-output list
- * (per user-supplied figures: US ~18M, China ~13M, UK ~5.4M, Germany
- * ~4.6M, Japan ~3.8M, India ~3.75M, France ~3.1M, Italy ~2.9M, Canada
- * ~2.7M, Australia ~2.3M documents) after excluding US/UK, which the
- * unfiltered 'global' query already surfaces heavily -- so they come up
- * in rotation about twice as often as the long tail. The long tail below
- * is deliberately broad (every populated region, not just the biggest
- * producers) since the ask was "go around the world", not just "cover
- * the next few biggest countries".
+ * Because combos advance via a monotonic cursor through this array
+ * (discover_sources_openalex() below), a country's POSITION controls two
+ * things at once: how soon it's first reached, and (via repeat count)
+ * how often it comes back up each full cycle -- both reinforce priority,
+ * not just frequency. 'global' (no country filter) leads the array since
+ * it captures international/borderless repositories (Zenodo, SSRN, ...)
+ * that OpenAlex doesn't attribute to one specific country at all.
+ *
+ * Tier 1 (US, China -- the two far ahead of everyone else, ~13-18M docs
+ * each) appear 3x. Tier 2 (UK through Australia, ~2.3-5.4M docs each,
+ * same order of magnitude as each other) appear 2x, in the same relative
+ * rank order as the source figures. The long tail below is deliberately
+ * broad (every populated region, not just the biggest producers) since
+ * the original ask was "go around the world", not just "cover the
+ * biggest few countries" -- this ordering is a priority queue on top of
+ * that, not a replacement for covering everywhere eventually.
  */
 const OPENALEX_DISCOVERY_GEOGRAPHIES = [
     'global',
-    'CN', 'JP', 'IN', 'DE', 'FR', 'IT', 'CA', 'AU',
-    'CN', 'JP', 'IN', 'DE', 'FR', 'IT', 'CA', 'AU',
+    'US', 'US', 'US',
+    'CN', 'CN', 'CN',
+    'GB', 'GB',
+    'DE', 'DE',
+    'JP', 'JP',
+    'IN', 'IN',
+    'FR', 'FR',
+    'IT', 'IT',
+    'CA', 'CA',
+    'AU', 'AU',
     'TW', 'KR', 'SG', 'ID', 'TH', 'VN', 'PH', 'MY', 'BD', 'PK',
     'BR', 'MX', 'AR', 'CL', 'CO', 'PE',
     'NG', 'ZA', 'KE', 'EG', 'GH', 'ET', 'MA',
