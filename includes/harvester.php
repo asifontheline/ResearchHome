@@ -1305,7 +1305,7 @@ function process_queue_batch(int $limit = 20, ?float $deadline = null): array {
             $meta = extract_generic_metadata($body, $row['url']);
             maybe_flag_hub_candidate($row['url'], $body, $hostIsNew);
 
-            if (!$meta['title'] || looks_like_site_branding($meta['title'], $row['host'])) {
+            if (!$meta['title'] || looks_like_site_branding($meta['title'], $row['host']) || is_non_article_host($row['host'])) {
                 db()->prepare("UPDATE crawl_queue SET status='skipped', processed_at=NOW() WHERE id=?")->execute([$row['id']]);
                 continue;
             }
@@ -1647,9 +1647,27 @@ function reclassify_general_backlog(int $limit, ?float $deadline = null): array 
 
     $checked = 0;
     $upgraded = 0;
+    $pruned = 0;
     foreach ($rows as $row) {
         if ($deadline !== null && time_budget_exceeded($deadline)) break;
         $checked++;
+
+        // Retroactive junk check -- is_junk_title()/looks_like_site_branding()/
+        // is_non_article_host() only ever ran at insert time, so an item
+        // that predates one of these filters (or slipped through a gap one
+        // later closed) sits here forever, since no amount of better
+        // subject-matching will ever give a non-article a real tag.
+        // Confirmed on production: "ORCID" (orcid.org) was still sitting
+        // in General despite matching looks_like_site_branding() today --
+        // nothing had ever re-checked it since insertion. Deleting rather
+        // than reclassifying is correct here, same as the crawler's own
+        // insert-time skip for the identical signal.
+        $host = parse_url($row['url'], PHP_URL_HOST) ?: '';
+        if (is_junk_title($row['title'] ?? '') || looks_like_site_branding($row['title'] ?? '', $host) || is_non_article_host($host)) {
+            delete_item((int) $row['id']);
+            $pruned++;
+            continue;
+        }
 
         $text = trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? ''));
         $matches = classify_subjects($text);
@@ -1671,7 +1689,7 @@ function reclassify_general_backlog(int $limit, ?float $deadline = null): array 
         }
     }
 
-    return ['checked' => $checked, 'upgraded' => $upgraded];
+    return ['checked' => $checked, 'upgraded' => $upgraded, 'pruned' => $pruned];
 }
 
 /**
@@ -2021,7 +2039,7 @@ function run_validator(): array {
     $groupBackfill = ['assigned' => 0];
     $retag = ['checked' => 0, 'retagged' => 0, 'rescued' => 0];
     $zeroTag = ['checked' => 0, 'tagged' => 0, 'fallback' => 0];
-    $general = ['checked' => 0, 'upgraded' => 0];
+    $general = ['checked' => 0, 'upgraded' => 0, 'pruned' => 0];
     $language = ['checked' => 0, 'detected' => 0];
     try {
         try {
@@ -2067,7 +2085,8 @@ function run_validator(): array {
             . "reviewed {$retag['checked']} existing item(s), retagged {$retag['retagged']}, "
             . "rescued {$retag['rescued']} newly-zero-tag; zero-tag scan checked {$zeroTag['checked']}, "
             . "tagged {$zeroTag['tagged']}, fell back to General for {$zeroTag['fallback']}; "
-            . "General-reclassify checked {$general['checked']}, upgraded {$general['upgraded']}; "
+            . "General-reclassify checked {$general['checked']}, upgraded {$general['upgraded']}, "
+            . "pruned {$general['pruned']} non-articles; "
             . "language backfill checked {$language['checked']}, detected {$language['detected']}; "
             . "validation-group backfill assigned {$groupBackfill['assigned']}.";
     } catch (Throwable $e) {

@@ -77,7 +77,7 @@ function validator_daemon_fresh_agg(): array {
         'links_checked' => 0, 'links_validated' => 0, 'items_removed' => 0,
         'retag_checked' => 0, 'retagged' => 0, 'rescued' => 0,
         'zero_tag_checked' => 0, 'zero_tag_tagged' => 0, 'zero_tag_fallback' => 0,
-        'general_checked' => 0, 'general_upgraded' => 0,
+        'general_checked' => 0, 'general_upgraded' => 0, 'general_pruned' => 0,
         'language_checked' => 0, 'language_detected' => 0,
         'groups_backfilled' => 0,
     ];
@@ -97,7 +97,8 @@ function validator_daemon_flush(array &$agg, string &$windowStart): void {
             . "retagged {$agg['retagged']}, rescued {$agg['rescued']} newly-zero-tag; "
             . "zero-tag scan checked {$agg['zero_tag_checked']}, tagged {$agg['zero_tag_tagged']}, "
             . "fell back to General for {$agg['zero_tag_fallback']}; "
-            . "General-reclassify checked {$agg['general_checked']}, upgraded {$agg['general_upgraded']}; "
+            . "General-reclassify checked {$agg['general_checked']}, upgraded {$agg['general_upgraded']}, "
+            . "pruned {$agg['general_pruned']} non-articles; "
             . "language backfill checked {$agg['language_checked']}, detected {$agg['language_detected']}; "
             . "validation-group backfill assigned {$agg['groups_backfilled']}.",
     ]);
@@ -153,6 +154,7 @@ while (!$shuttingDown) {
             $r = reclassify_general_backlog(25, $iterationDeadline);
             $agg['general_checked'] += $r['checked'];
             $agg['general_upgraded'] += $r['upgraded'];
+            $agg['general_pruned'] += $r['pruned'];
         });
 
         validator_daemon_run_task('link-check', function () use (&$agg, $iterationDeadline) {

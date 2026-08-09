@@ -1446,6 +1446,27 @@ function looks_like_site_branding(string $title, string $host): bool {
     return str_contains($normalizedHost, $normalizedTitle) || str_contains($normalizedTitle, $normalizedHost);
 }
 
+/**
+ * Hosts that are never going to host a genuine research article — social-
+ * media profile pages, confirmed on production to slip through both
+ * is_junk_title() and looks_like_site_branding() (e.g. "PLOS One
+ * (@plosone.org)" on bsky.app: the crawler followed an outbound link to
+ * a publisher's social profile and cataloged it as if it were content).
+ * Deliberately narrow and high-confidence only — does NOT include
+ * youtube.com/vimeo.com, which are legitimate, intentional sources for
+ * the separate video section (content_type='video', videos.php) and must
+ * never be caught by this.
+ */
+const NON_ARTICLE_HOSTS = [
+    'bsky.app', 'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
+    'linkedin.com', 'threads.net', 'tiktok.com', 'pinterest.com',
+];
+
+function is_non_article_host(string $host): bool {
+    $host = strtolower(preg_replace('/^www\./', '', $host));
+    return in_array($host, NON_ARTICLE_HOSTS, true);
+}
+
 function fetch_generic(string $url): ?array {
     $body = safe_http_get($url);
     if (!$body) return null;
