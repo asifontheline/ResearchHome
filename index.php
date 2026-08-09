@@ -44,6 +44,21 @@ if ($q !== '') {
     if ($searchMatch !== null) {
         $where[] = 'MATCH(i.title, i.authors, i.abstract, i.notes) AGAINST (? IN BOOLEAN MODE)';
         $params[] = $searchMatch;
+    } elseif ($substringMatch = search_substring_fallback($q, $where, $params, $joinClause)) {
+        // Every FULLTEXT tier came up empty -- try a raw substring match
+        // across the same 4 columns before giving up entirely. This matters
+        // most for languages/scripts without whitespace between words
+        // (Chinese, Japanese, ...): MySQL's default (non-ngram) FULLTEXT
+        // parser effectively treats a whole run of CJK characters as one
+        // giant token, so a wildcard match only succeeds when the query
+        // happens to align with the very start of that token -- confirmed
+        // locally. LIKE '%...%' doesn't care about word segmentation at
+        // all, so it's a reliable fallback regardless of script/language,
+        // at the cost of a full-table scan -- acceptable since this only
+        // ever runs after every cheaper, indexed tier has already failed.
+        $where[] = $substringMatch['clause'];
+        $params = array_merge($params, $substringMatch['params']);
+        $isLooseMatch = true;
     } else {
         // Every candidate, including the broadest, found nothing -- a
         // genuine zero, not just a strict-tier miss.

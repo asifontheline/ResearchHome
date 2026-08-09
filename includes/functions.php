@@ -269,6 +269,53 @@ function search_match_candidates(string $q): array {
 }
 
 /**
+ * Last-resort search tier for when every search_match_candidates() tier
+ * (exact phrase, all-words, any-word — all via MySQL FULLTEXT) comes up
+ * empty. A plain substring LIKE across the same 4 columns, unlike
+ * FULLTEXT, doesn't depend on word-boundary tokenization at all — matters
+ * most for scripts without whitespace between words (Chinese, Japanese,
+ * ...), where MySQL's default (non-ngram) FULLTEXT parser effectively
+ * indexes a whole run of CJK characters as one giant token, so a wildcard
+ * match only succeeds when the query happens to align with the very
+ * start of that token (confirmed against a real MySQL instance: a query
+ * matching a title's opening characters matched, the identical text a few
+ * characters further in did not). LIKE '%...%' has no such requirement,
+ * at the cost of a full-table scan — acceptable since callers only reach
+ * this after every cheaper, indexed tier has already failed, not on the
+ * common path where FULLTEXT already found something.
+ *
+ * Returns null (not tried, or found nothing) or ['clause' => ..., 'params' => [...]]
+ * ready to merge into the caller's own $where/$params arrays. Runs its
+ * own COUNT check internally (same shape as index.php's per-tier check)
+ * so callers don't have to duplicate that query-building logic.
+ */
+function search_substring_fallback(string $q, array $where, array $params, string $joinClause): ?array {
+    $q = trim($q);
+    if ($q === '') return null;
+
+    // Escape LIKE's own wildcard characters in the user's query so a
+    // literal "%" or "_" typed by a visitor doesn't act as a wildcard --
+    // this is a correctness fix (avoid over-broad matches), not a security
+    // one, same as search_match_candidates()' operator-stripping already
+    // isn't security-motivated (every value here is still a bound param).
+    $escaped = addcslashes($q, '\\%_');
+    $likeParam = '%' . $escaped . '%';
+
+    $clause = '(i.title LIKE ? ESCAPE \'\\\\\' OR i.authors LIKE ? ESCAPE \'\\\\\' OR i.abstract LIKE ? ESCAPE \'\\\\\' OR i.notes LIKE ? ESCAPE \'\\\\\')';
+    $likeParams = [$likeParam, $likeParam, $likeParam, $likeParam];
+
+    $testWhere = array_merge($where, [$clause]);
+    $testWhereClause = ' WHERE ' . implode(' AND ', $testWhere);
+    $stmt = db()->prepare("SELECT COUNT(DISTINCT i.id) FROM items i{$joinClause}{$testWhereClause}");
+    $stmt->execute(array_merge($params, $likeParams));
+    if ((int) $stmt->fetchColumn() === 0) {
+        return null;
+    }
+
+    return ['clause' => $clause, 'params' => $likeParams];
+}
+
+/**
  * Direct search links on other free/open portals, for when we genuinely
  * have nothing yet — a positive next step instead of a dead end while the
  * queued search above waits for the next harvest run.
