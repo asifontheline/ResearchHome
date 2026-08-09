@@ -139,6 +139,22 @@ while (!$shuttingDown) {
             $agg['groups_backfilled'] += $r['assigned'];
         });
 
+        // Runs 2nd (right after the near-free group backfill), not last,
+        // and at a much higher limit (25, was 5) -- confirmed the General
+        // backlog had grown to ~1000+ items (~25% of the catalog), and at
+        // the old limit/position it was consistently starved of both
+        // budget (competing against 3 other HTTP-fetching sub-tasks for
+        // the same shared 30s hard-alarm window, usually last) and volume.
+        // Prioritized here over link-check/zero-tag/language since an
+        // over-broad 'General' tag actively hurts browsing/search *right
+        // now* for ~1 in 4 items, more urgent than a link that's still
+        // reachable or a language badge that's merely missing.
+        validator_daemon_run_task('General-reclassify', function () use (&$agg, $iterationDeadline) {
+            $r = reclassify_general_backlog(25, $iterationDeadline);
+            $agg['general_checked'] += $r['checked'];
+            $agg['general_upgraded'] += $r['upgraded'];
+        });
+
         validator_daemon_run_task('link-check', function () use (&$agg, $iterationDeadline) {
             $r = check_links_batch(5, $iterationDeadline);
             $agg['links_checked'] += $r['checked'];
@@ -158,12 +174,6 @@ while (!$shuttingDown) {
             $agg['zero_tag_checked'] += $r['checked'];
             $agg['zero_tag_tagged'] += $r['tagged'];
             $agg['zero_tag_fallback'] += $r['fallback'];
-        });
-
-        validator_daemon_run_task('General-reclassify', function () use (&$agg, $iterationDeadline) {
-            $r = reclassify_general_backlog(5, $iterationDeadline);
-            $agg['general_checked'] += $r['checked'];
-            $agg['general_upgraded'] += $r['upgraded'];
         });
 
         validator_daemon_run_task('language backfill', function () use (&$agg, $iterationDeadline) {
