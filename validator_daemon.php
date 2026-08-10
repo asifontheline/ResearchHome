@@ -35,6 +35,17 @@ const ITERATION_HARD_TIMEOUT_SECONDS = 30;
 const SLEEP_SECONDS = 5;
 const FLUSH_INTERVAL_SECONDS = 300; // 5 min -- matches the old cron cadence
 
+// General-reclassify also gets its own dedicated 10-minute sweep, on top
+// of (not instead of) the small slice it already gets every iteration --
+// the per-iteration slice shares ITERATION_HARD_TIMEOUT_SECONDS with 5
+// other sub-tasks, so it can only ever process a little at a time. This
+// sweep gets its own uncontested budget and a much larger limit, so the
+// General backlog gets one real, unhurried pass every 10 minutes instead
+// of only ever seeing small competing slices.
+const GENERAL_SWEEP_INTERVAL_SECONDS = 600; // 10 minutes
+const GENERAL_SWEEP_LIMIT = 200;
+const GENERAL_SWEEP_HARD_TIMEOUT_SECONDS = 60;
+
 $hasPcntl = extension_loaded('pcntl');
 $shuttingDown = false;
 
@@ -85,6 +96,7 @@ function validator_daemon_fresh_agg(): array {
 
 $agg = validator_daemon_fresh_agg();
 $lastFlush = time();
+$lastGeneralSweep = time();
 $windowStart = date('Y-m-d H:i:s');
 
 function validator_daemon_flush(array &$agg, string &$windowStart): void {
@@ -194,6 +206,34 @@ while (!$shuttingDown) {
         // mid-query and left the connection in a bad state -- reconnect
         // before the next iteration tries to use it.
         try { db(true); } catch (Throwable $e2) {}
+    }
+
+    // Dedicated General-reclassify sweep -- see GENERAL_SWEEP_INTERVAL_
+    // SECONDS' own comment. Own alarm/deadline, separate from the per-
+    // iteration one above (which is already disarmed by this point), so
+    // it doesn't compete with or get cut short by the other 5 sub-tasks.
+    if (time() - $lastGeneralSweep >= GENERAL_SWEEP_INTERVAL_SECONDS) {
+        $lastGeneralSweep = time();
+        validator_daemon_run_task('General deep sweep (10-min)', function () use (&$agg, $hasPcntl) {
+            if ($hasPcntl) pcntl_alarm(GENERAL_SWEEP_HARD_TIMEOUT_SECONDS);
+            try {
+                $sweepDeadline = microtime(true) + GENERAL_SWEEP_HARD_TIMEOUT_SECONDS - 3;
+                $r = reclassify_general_backlog(GENERAL_SWEEP_LIMIT, $sweepDeadline);
+                $agg['general_checked'] += $r['checked'];
+                $agg['general_upgraded'] += $r['upgraded'];
+                $agg['general_pruned'] += $r['pruned'];
+                printf(
+                    "%s General deep sweep: checked %d, upgraded %d, pruned %d.\n",
+                    date('Y-m-d H:i:s'), $r['checked'], $r['upgraded'], $r['pruned']
+                );
+            } finally {
+                // Guaranteed disarm even if reclassify_general_backlog()
+                // throws (including the alarm's own SIGALRM exception) --
+                // an un-disarmed alarm would otherwise fire again later,
+                // unexpectedly, during some totally unrelated later code.
+                if ($hasPcntl) pcntl_alarm(0);
+            }
+        });
     }
 
     // Heartbeat: keeps the single-instance lock fresh without needing a
