@@ -1149,7 +1149,18 @@ function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
                     db()->prepare('UPDATE seed_urls SET last_crawled_at = NOW(), failed_fetches = ?, first_failed_at = ? WHERE id = ?')
                         ->execute([$failures, $firstFailedAt, $seed['id']]);
                     $daysFailing = round((time() - strtotime($firstFailedAt)) / 86400, 1);
-                    $errors[] = "seed {$seed['id']} ({$seed['url']}) fetch failed ({$failures} attempts, {$daysFailing}/" . SEED_FAILURE_MIN_DAYS . " days)";
+                    // Only the FIRST failure of a new streak counts as a
+                    // "real" error (count_real_errors()) -- a seed that was
+                    // fine yesterday and just started failing is worth an
+                    // admin noticing. Every attempt after that, up until the
+                    // 3-day tolerance actually disables it, is already-known,
+                    // already-being-tolerated noise -- confirmed on
+                    // production: seeds routinely logged 50-70+ of these
+                    // before disabling, one per harvest run, drowning out
+                    // genuinely new problems (an API source failing, a
+                    // newly-broken seed) in the same run's error count.
+                    $prefix = ($failures === 1) ? '' : 'Seed retry pending (known failing, not yet disabled): ';
+                    $errors[] = "{$prefix}seed {$seed['id']} ({$seed['url']}) fetch failed ({$failures} attempts, {$daysFailing}/" . SEED_FAILURE_MIN_DAYS . " days)";
                 }
                 continue;
             }
@@ -1215,7 +1226,6 @@ function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
             // whole run — reconnect so the next seed gets a working
             // connection, log it, and move on.
             db(true);
-            $errors[] = "seed {$seed['id']} ({$seed['url']}): " . $e->getMessage();
 
             // This path used to skip last_crawled_at/failed_fetches
             // entirely, unlike the normal fetch-failure path below — which
@@ -1230,6 +1240,13 @@ function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
             try {
                 $failures = (int) $seed['failed_fetches'] + 1;
                 $firstFailedAt = ((int) $seed['failed_fetches'] === 0) ? date('Y-m-d H:i:s') : $seed['first_failed_at'];
+                // Same first-failure-only real-error treatment as the
+                // normal fetch-failure path above -- a seed reliably
+                // hitting this exception every run would otherwise log a
+                // "real" error on every single harvest run for up to 3
+                // days straight.
+                $prefix = ($failures === 1) ? '' : 'Seed retry pending (known failing, not yet disabled): ';
+                $errors[] = "{$prefix}seed {$seed['id']} ({$seed['url']}): " . $e->getMessage();
                 if (seed_should_disable($failures, $firstFailedAt)) {
                     disable_seed_after_failure((int)$seed['id'], $failures);
                 } else {
@@ -1239,6 +1256,7 @@ function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
             } catch (Throwable $e2) {
                 // Even the reconnect+update attempt failed; move on rather
                 // than crash the whole batch over one row.
+                $errors[] = "seed {$seed['id']} ({$seed['url']}): " . $e->getMessage();
             }
         }
     }
@@ -1784,6 +1802,7 @@ function count_real_errors(array $errors): int {
         'Skipped: a previous validator run',
         'Validator:',
         'Discovery swept:',
+        'Seed retry pending (known failing, not yet disabled):',
     ];
     return count(array_filter($errors, function ($e) use ($noticePrefixes) {
         foreach ($noticePrefixes as $prefix) {
