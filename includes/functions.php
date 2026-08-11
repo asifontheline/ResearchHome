@@ -1331,7 +1331,21 @@ function safe_http_get(string $url, array $headers = []): ?string {
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS => 5,
-        CURLOPT_TIMEOUT => 15,
+        // Was 15 -- confirmed on production this is the direct cause of
+        // validator_daemon.php's per-sub-task alarm firing on nearly every
+        // iteration: every validator pass that reclassifies items
+        // (reclassify_general_backlog(), classify_zero_tag_backlog(),
+        // retag_backlog_batch()'s rescue, backfill_language_batch()) calls
+        // this in a sequential loop over many items within one
+        // pcntl_alarm-protected window (30s per iteration, 60s for the
+        // dedicated General sweep) -- the hard alarm only fires *between*
+        // items via the soft time_budget_exceeded() check, never inside a
+        // single curl_exec() call, so just 2 slow-but-legitimately-
+        // responding sites at the old 15s each was enough to blow the
+        // entire budget mid-fetch on its own. 8s still gives a normal page
+        // fetch generous headroom while letting 3-4x as many slow items
+        // fit inside the same alarm window before it fires.
+        CURLOPT_TIMEOUT => 8,
         // See check_url_status()'s comment -- CURLOPT_TIMEOUT alone doesn't
         // reliably bound a hanging DNS lookup on every system.
         CURLOPT_CONNECTTIMEOUT => 5,
