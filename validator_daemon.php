@@ -126,7 +126,20 @@ function validator_daemon_flush(array &$agg, string &$windowStart): void {
 // iteration, including totally unrelated ones like the General-reclassify
 // pass, for as long as that bug was live. This function isolates one
 // sub-task so a failure in it can never block its siblings.
-function validator_daemon_run_task(string $label, callable $fn): void {
+//
+// Also arms its own fresh pcntl_alarm() per call, not just once per
+// iteration -- pcntl_alarm() is one-shot (same as the underlying POSIX
+// alarm() syscall it wraps): once it fires and interrupts whichever
+// sub-task was running at that moment, it's spent, and every sub-task
+// AFTER it in that same iteration would otherwise run with zero hang
+// protection until the next loop tick re-arms it. Re-arming per sub-task
+// means a hang in one sub-task can never leave its siblings unprotected.
+// Trade-off: a worst case where every sub-task hangs its full budget
+// could stretch one iteration well past ITERATION_HARD_TIMEOUT_SECONDS
+// -- an intentional, bounded trade for "every sub-task always has real
+// timeout protection" over "the iteration as a whole has a hard cap".
+function validator_daemon_run_task(string $label, callable $fn, bool $hasPcntl, int $timeoutSeconds = ITERATION_HARD_TIMEOUT_SECONDS): void {
+    if ($hasPcntl) pcntl_alarm($timeoutSeconds);
     try {
         $fn();
     } catch (Throwable $e) {
@@ -143,17 +156,21 @@ function validator_daemon_run_task(string $label, callable $fn): void {
         // for exactly this failure mode -- moved the reconnect here so it
         // still happens regardless of which sub-task hit it.
         try { db(true); } catch (Throwable $e2) {}
+    } finally {
+        if ($hasPcntl) pcntl_alarm(0);
     }
 }
 
 while (!$shuttingDown) {
     try {
-        if ($hasPcntl) pcntl_alarm(ITERATION_HARD_TIMEOUT_SECONDS);
-
         // Soft deadline still checked inside each batch function too --
         // belt and suspenders. Small per-iteration limits since this runs
         // constantly rather than once per 5 minutes; small-and-frequent
         // adds up to the same throughput with far less exposed per hang.
+        // Each sub-task below gets its own fresh alarm window (see
+        // validator_daemon_run_task()'s own comment) -- this deadline is
+        // the matching soft budget for that same window, not a shared
+        // iteration-wide one anymore.
         $iterationDeadline = microtime(true) + ITERATION_HARD_TIMEOUT_SECONDS - 3;
 
         // Catches up any items still missing a validation_group (pre-
@@ -162,7 +179,7 @@ while (!$shuttingDown) {
         validator_daemon_run_task('validation-group backfill', function () use (&$agg, $iterationDeadline) {
             $r = backfill_validation_groups_batch(200, $iterationDeadline);
             $agg['groups_backfilled'] += $r['assigned'];
-        });
+        }, $hasPcntl);
 
         // Runs 2nd (right after the near-free group backfill), not last,
         // and at a much higher limit (25, was 5) -- confirmed the General
@@ -179,73 +196,61 @@ while (!$shuttingDown) {
             $agg['general_checked'] += $r['checked'];
             $agg['general_upgraded'] += $r['upgraded'];
             $agg['general_pruned'] += $r['pruned'];
-        });
+        }, $hasPcntl);
 
         validator_daemon_run_task('link-check', function () use (&$agg, $iterationDeadline) {
             $r = check_links_batch(5, $iterationDeadline);
             $agg['links_checked'] += $r['checked'];
             $agg['links_validated'] += $r['validated'];
             $agg['items_removed'] += $r['removed'];
-        });
+        }, $hasPcntl);
 
         validator_daemon_run_task('retag', function () use (&$agg, $iterationDeadline) {
             $r = retag_backlog_batch(50, $iterationDeadline);
             $agg['retag_checked'] += $r['checked'];
             $agg['retagged'] += $r['retagged'];
             $agg['rescued'] += $r['rescued'];
-        });
+        }, $hasPcntl);
 
         validator_daemon_run_task('zero-tag rescue', function () use (&$agg, $iterationDeadline) {
             $r = classify_zero_tag_backlog(5, $iterationDeadline);
             $agg['zero_tag_checked'] += $r['checked'];
             $agg['zero_tag_tagged'] += $r['tagged'];
             $agg['zero_tag_fallback'] += $r['fallback'];
-        });
+        }, $hasPcntl);
 
         validator_daemon_run_task('language backfill', function () use (&$agg, $iterationDeadline) {
             $r = backfill_language_batch(5, $iterationDeadline);
             $agg['language_checked'] += $r['checked'];
             $agg['language_detected'] += $r['detected'];
-        });
-
-        if ($hasPcntl) pcntl_alarm(0); // disarm -- this iteration finished cleanly
+        }, $hasPcntl);
     } catch (Throwable $e) {
-        if ($hasPcntl) pcntl_alarm(0);
-        // Only a truly whole-iteration failure lands here now (the hard
-        // pcntl_alarm timeout itself, or something outside all 6 sub-tasks).
+        // Should be effectively unreachable now -- every sub-task above
+        // catches its own Throwable internally (validator_daemon_run_task())
+        // -- kept as a defensive backstop for anything truly outside all 6
+        // sub-task calls (e.g. the $iterationDeadline expression itself).
         printf("%s Iteration failed: %s -- continuing.\n", date('Y-m-d H:i:s'), $e->getMessage());
-        // The alarm (if that's what interrupted us) could have fired
-        // mid-query and left the connection in a bad state -- reconnect
-        // before the next iteration tries to use it.
         try { db(true); } catch (Throwable $e2) {}
     }
 
     // Dedicated General-reclassify sweep -- see GENERAL_SWEEP_INTERVAL_
-    // SECONDS' own comment. Own alarm/deadline, separate from the per-
-    // iteration one above (which is already disarmed by this point), so
-    // it doesn't compete with or get cut short by the other 5 sub-tasks.
+    // SECONDS' own comment. Its own longer timeout window
+    // (GENERAL_SWEEP_HARD_TIMEOUT_SECONDS), passed through to the same
+    // per-call alarm handling every other sub-task uses, so it doesn't
+    // compete with or get cut short by the other 5 sub-tasks.
     if (time() - $lastGeneralSweep >= GENERAL_SWEEP_INTERVAL_SECONDS) {
         $lastGeneralSweep = time();
-        validator_daemon_run_task('General deep sweep (10-min)', function () use (&$agg, $hasPcntl) {
-            if ($hasPcntl) pcntl_alarm(GENERAL_SWEEP_HARD_TIMEOUT_SECONDS);
-            try {
-                $sweepDeadline = microtime(true) + GENERAL_SWEEP_HARD_TIMEOUT_SECONDS - 3;
-                $r = reclassify_general_backlog(GENERAL_SWEEP_LIMIT, $sweepDeadline);
-                $agg['general_checked'] += $r['checked'];
-                $agg['general_upgraded'] += $r['upgraded'];
-                $agg['general_pruned'] += $r['pruned'];
-                printf(
-                    "%s General deep sweep: checked %d, upgraded %d, pruned %d.\n",
-                    date('Y-m-d H:i:s'), $r['checked'], $r['upgraded'], $r['pruned']
-                );
-            } finally {
-                // Guaranteed disarm even if reclassify_general_backlog()
-                // throws (including the alarm's own SIGALRM exception) --
-                // an un-disarmed alarm would otherwise fire again later,
-                // unexpectedly, during some totally unrelated later code.
-                if ($hasPcntl) pcntl_alarm(0);
-            }
-        });
+        validator_daemon_run_task('General deep sweep (10-min)', function () use (&$agg) {
+            $sweepDeadline = microtime(true) + GENERAL_SWEEP_HARD_TIMEOUT_SECONDS - 3;
+            $r = reclassify_general_backlog(GENERAL_SWEEP_LIMIT, $sweepDeadline);
+            $agg['general_checked'] += $r['checked'];
+            $agg['general_upgraded'] += $r['upgraded'];
+            $agg['general_pruned'] += $r['pruned'];
+            printf(
+                "%s General deep sweep: checked %d, upgraded %d, pruned %d.\n",
+                date('Y-m-d H:i:s'), $r['checked'], $r['upgraded'], $r['pruned']
+            );
+        }, $hasPcntl, GENERAL_SWEEP_HARD_TIMEOUT_SECONDS);
     }
 
     // Heartbeat: keeps the single-instance lock fresh without needing a
