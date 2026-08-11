@@ -1487,7 +1487,7 @@ function retag_backlog_batch(int $limit, ?float $deadline = null): array {
         return ['checked' => 0, 'retagged' => 0, 'rescued' => 0, 'done' => true];
     }
 
-    $stmt = db()->prepare('SELECT id, title, url, abstract FROM items WHERE id > ? ORDER BY id ASC LIMIT ' . (int) $limit);
+    $stmt = db()->prepare('SELECT id, title, url, abstract, language FROM items WHERE id > ? ORDER BY id ASC LIMIT ' . (int) $limit);
     $stmt->execute([$cursor]);
     $rows = $stmt->fetchAll();
 
@@ -1538,9 +1538,17 @@ function retag_backlog_batch(int $limit, ?float $deadline = null): array {
         // closed out for good instead of staying zero-tagged.
         if ($otherTagCount === 0 && !$newMatches) {
             $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
-            $rescueMatches = $body
-                ? classify_subjects(trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? '')) . ' ' . extract_body_text($body))
-                : [];
+            $rescueMatches = [];
+            if ($body) {
+                $enriched = enrich_from_fetched_body($body, $row['url']);
+                $rescueMatches = classify_subjects(trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? '')) . ' ' . $enriched['synopsis']);
+                // Same fetch already parsed a language -- set it now rather
+                // than leaving backfill_language_batch() to redundantly
+                // re-fetch this exact URL later just to get it.
+                if (empty($row['language']) && $enriched['language']) {
+                    db()->prepare('UPDATE items SET language = ? WHERE id = ?')->execute([$enriched['language'], $lastId]);
+                }
+            }
             set_item_tags($lastId, resolve_tag_ids(implode(',', $rescueMatches ?: ['general'])));
             $rescued++;
         }
@@ -1575,7 +1583,7 @@ function classify_zero_tag_backlog(int $limit, ?float $deadline = null): array {
     // this query's result set, no bookkeeping needed to avoid reprocessing
     // them, and nothing can ever get permanently stuck behind a stale cursor.
     $stmt = db()->prepare(
-        'SELECT i.id, i.title, i.url, i.abstract FROM items i
+        'SELECT i.id, i.title, i.url, i.abstract, i.language FROM items i
          LEFT JOIN item_tags it ON it.item_id = i.id
          WHERE it.item_id IS NULL
          ORDER BY RAND() LIMIT ' . (int) $limit
@@ -1593,7 +1601,11 @@ function classify_zero_tag_backlog(int $limit, ?float $deadline = null): array {
         $text = trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? ''));
         $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
         if ($body) {
-            $text .= ' ' . extract_body_text($body);
+            $enriched = enrich_from_fetched_body($body, $row['url']);
+            $text .= ' ' . $enriched['synopsis'];
+            if (empty($row['language']) && $enriched['language']) {
+                db()->prepare('UPDATE items SET language = ? WHERE id = ?')->execute([$enriched['language'], (int) $row['id']]);
+            }
         }
 
         $matches = classify_subjects($text);
@@ -1636,7 +1648,7 @@ function classify_zero_tag_backlog(int $limit, ?float $deadline = null): array {
  */
 function reclassify_general_backlog(int $limit, ?float $deadline = null): array {
     $stmt = db()->prepare(
-        "SELECT i.id, i.title, i.url, i.abstract FROM items i
+        "SELECT i.id, i.title, i.url, i.abstract, i.language FROM items i
          JOIN item_tags it ON it.item_id = i.id
          JOIN tags t ON t.id = it.tag_id
          WHERE t.slug = 'general'
@@ -1674,7 +1686,11 @@ function reclassify_general_backlog(int $limit, ?float $deadline = null): array 
         if (!$matches) {
             $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
             if ($body) {
-                $matches = classify_subjects($text . ' ' . extract_body_text($body));
+                $enriched = enrich_from_fetched_body($body, $row['url']);
+                $matches = classify_subjects($text . ' ' . $enriched['synopsis']);
+                if (empty($row['language']) && $enriched['language']) {
+                    db()->prepare('UPDATE items SET language = ? WHERE id = ?')->execute([$enriched['language'], (int) $row['id']]);
+                }
             }
         }
 

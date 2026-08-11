@@ -1580,3 +1580,29 @@ function extract_body_text(string $html, int $maxChars = 4000): string {
     $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
     return mb_substr(trim($text), 0, $maxChars);
 }
+
+/**
+ * Shared by every validator pass that fetches a page body to reclassify an
+ * item (retag_backlog_batch()'s rescue, classify_zero_tag_backlog(),
+ * reclassify_general_backlog()) -- reuses that one fetch for both a
+ * better classification input AND language detection, instead of each
+ * pass calling bare extract_body_text() and discarding everything else
+ * extract_generic_metadata() already parses from the same body, leaving
+ * language detection to backfill_language_batch() to redundantly re-fetch
+ * the identical URL later just to get it.
+ *
+ * 'synopsis' prefers a real meta-description/og:description (a genuine,
+ * curated summary of the page, when one exists) over extract_body_text()'s
+ * raw truncated dump of visible text (which frequently opens with
+ * navigation/boilerplate before reaching actual article content) --
+ * meaningfully better input for classify_subjects() when a page has one,
+ * with the same raw-text fallback as before when it doesn't.
+ */
+function enrich_from_fetched_body(string $body, string $url): array {
+    $meta = extract_generic_metadata($body, $url);
+    $synopsis = trim((string) ($meta['abstract'] ?? ''));
+    if ($synopsis === '') {
+        $synopsis = extract_body_text($body);
+    }
+    return ['synopsis' => $synopsis, 'language' => $meta['language'] ?? null];
+}
