@@ -131,6 +131,18 @@ function validator_daemon_run_task(string $label, callable $fn): void {
         $fn();
     } catch (Throwable $e) {
         printf("%s Sub-task '%s' failed: %s -- other sub-tasks this iteration still ran.\n", date('Y-m-d H:i:s'), $label, $e->getMessage());
+        // Confirmed on production: a SIGALRM interrupting a query mid-flight
+        // left the shared MySQL connection in a broken state ("MySQL server
+        // has gone away"), which then cascaded into every OTHER sub-task
+        // that same iteration failing the identical way -- and, since
+        // nothing ever reconnected, every iteration after that too,
+        // forever, with the process still technically "alive" the whole
+        // time. This reconnect used to live in the loop's own outer catch
+        // block, but isolating each sub-task into its own try/catch (see
+        // this function's own comment) made that outer catch unreachable
+        // for exactly this failure mode -- moved the reconnect here so it
+        // still happens regardless of which sub-task hit it.
+        try { db(true); } catch (Throwable $e2) {}
     }
 }
 

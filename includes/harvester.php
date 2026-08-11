@@ -2062,6 +2062,11 @@ function run_validator(): array {
             $groupBackfill = backfill_validation_groups_batch(2000, $deadline);
         } catch (Throwable $e) {
             $errors[] = 'Validator sub-task (validation-group backfill) failed: ' . $e->getMessage();
+            // A dropped connection ("MySQL server has gone away" -- a slow
+            // fetch outrunning wait_timeout, seen on production) would
+            // otherwise cascade into every sub-task after this one failing
+            // the identical way, since they all share the same connection.
+            try { db(true); } catch (Throwable $e2) {}
         }
 
         try {
@@ -2071,30 +2076,35 @@ function run_validator(): array {
             $itemsRemoved = $linkCheck['removed'];
         } catch (Throwable $e) {
             $errors[] = 'Validator sub-task (link-check) failed: ' . $e->getMessage();
+            try { db(true); } catch (Throwable $e2) {}
         }
 
         try {
             $retag = retag_backlog_batch(500, $deadline);
         } catch (Throwable $e) {
             $errors[] = 'Validator sub-task (retag) failed: ' . $e->getMessage();
+            try { db(true); } catch (Throwable $e2) {}
         }
 
         try {
             $zeroTag = classify_zero_tag_backlog(50, $deadline);
         } catch (Throwable $e) {
             $errors[] = 'Validator sub-task (zero-tag rescue) failed: ' . $e->getMessage();
+            try { db(true); } catch (Throwable $e2) {}
         }
 
         try {
             $general = reclassify_general_backlog(50, $deadline);
         } catch (Throwable $e) {
             $errors[] = 'Validator sub-task (General-reclassify) failed: ' . $e->getMessage();
+            try { db(true); } catch (Throwable $e2) {}
         }
 
         try {
             $language = backfill_language_batch(50, $deadline);
         } catch (Throwable $e) {
             $errors[] = 'Validator sub-task (language backfill) failed: ' . $e->getMessage();
+            try { db(true); } catch (Throwable $e2) {}
         }
 
         $errors[] = "Validator: link-check checked {$linksChecked}, validated {$linksValidated}, removed {$itemsRemoved}; "
