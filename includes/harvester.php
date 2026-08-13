@@ -1717,8 +1717,9 @@ function reclassify_general_backlog(int $limit, ?float $deadline = null): array 
             continue;
         }
 
+        $isDebugItem = $debugLogged < 5;
         $text = trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? ''));
-        $matches = classify_subjects($text);
+        $matches = classify_subjects($text, $isDebugItem);
         $debugFetched = false;
         $debugBodyLen = 0;
         if (!$matches) {
@@ -1727,7 +1728,7 @@ function reclassify_general_backlog(int $limit, ?float $deadline = null): array 
             $debugBodyLen = $body ? strlen($body) : 0;
             if ($body) {
                 $enriched = enrich_from_fetched_body($body, $row['url']);
-                $matches = classify_subjects($text . ' ' . $enriched['synopsis']);
+                $matches = classify_subjects($text . ' ' . $enriched['synopsis'], $isDebugItem);
                 if (empty($row['language']) && $enriched['language']) {
                     db()->prepare('UPDATE items SET language = ? WHERE id = ?')->execute([$enriched['language'], (int) $row['id']]);
                 }

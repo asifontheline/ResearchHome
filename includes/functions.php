@@ -1024,23 +1024,58 @@ function get_subjects(): array {
     return $subjects;
 }
 
-function classify_subjects(string $text): array {
+/**
+ * $debug=true traces exactly what's happening internally instead of just
+ * the final result -- specifically distinguishes preg_match() genuinely
+ * finding zero matches (returns 0) from preg_match() silently *erroring*
+ * on this specific input (returns false -- a PCRE backtrack/recursion
+ * limit, a malformed pattern, or invalid UTF-8 in $text under the /u
+ * modifier all produce this) and being treated as "no match" by the
+ * original `=== 1` check either way. Off by default (zero overhead,
+ * zero output) -- only reclassify_general_backlog() opts a handful of
+ * items per call into this while root-causing why production never
+ * produces a single match despite obviously-classifiable real content.
+ */
+function classify_subjects(string $text, bool $debug = false): array {
     $subjects = get_subjects();
+    $originalLen = mb_strlen($text);
     $text = mb_strtolower($text);
+    $loweredLen = mb_strlen($text);
     $matches = [];
+    $keywordsTested = 0;
+    $pcreErrors = 0;
+    $firstPcreError = null;
     foreach ($subjects as $slug => $def) {
         foreach ($def['keywords'] as $kw) {
             $kw = mb_strtolower($kw);
+            $keywordsTested++;
             // Word-boundary match, not a raw substring search — plain
             // mb_strpos let single-word keywords fire inside unrelated
             // words/phrases (this is how a gut-microbiota/anemia review got
             // tagged "Law": "regulation" as a bare substring keyword matched
             // "iron regulation" in the abstract).
-            if (preg_match('/\b' . preg_quote($kw, '/') . '\b/u', $text) === 1) {
+            $result = preg_match('/\b' . preg_quote($kw, '/') . '\b/u', $text);
+            if ($result === false && $firstPcreError === null) {
+                // preg_last_error_msg() needs PHP 8.0+ -- fall back to the
+                // numeric code (preg_last_error()) on anything older rather
+                // than risk a fatal "call to undefined function" while
+                // debugging why nothing else is working either.
+                $errMsg = function_exists('preg_last_error_msg') ? preg_last_error_msg() : ('code ' . preg_last_error());
+                $firstPcreError = ['keyword' => $kw, 'pcre_error' => $errMsg];
+            }
+            if ($result === false) $pcreErrors++;
+            if ($result === 1) {
                 $matches[] = $slug;
                 break;
             }
         }
+    }
+    if ($debug && PHP_SAPI === 'cli') {
+        printf(
+            "%s [classify-debug] taxonomy_subjects=%d text_len=%d->%d(lowered) keywords_tested=%d pcre_errors=%d matches=%d%s\n",
+            date('Y-m-d H:i:s'), count($subjects), $originalLen, $loweredLen, $keywordsTested, $pcreErrors, count($matches),
+            $firstPcreError ? " first_pcre_error=[kw=\"{$firstPcreError['keyword']}\" msg=\"{$firstPcreError['pcre_error']}\"]" : ''
+        );
     }
     return $matches;
 }
