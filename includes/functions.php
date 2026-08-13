@@ -962,6 +962,70 @@ function arxiv_category_label(string $code): string {
  * only lived in a file. DB storage survives deploys the same way items/
  * tags/seeds already do.
  */
+/**
+ * Merges any NEW keywords added to includes/subjects.php into the live DB
+ * rows, by slug -- a UNION with each row's existing keywords (no
+ * duplicates), never an overwrite. subjects.php is only ever read once for
+ * the initial table seed otherwise (ensure_subjects_table()); without this,
+ * an existing install can never pick up an expanded keyword list without
+ * a manual admin edit of all 85 rows one at a time.
+ *
+ * Confirmed on production (2026-08-13): classify_subjects() was working
+ * completely correctly the whole time -- the original seed's keyword list
+ * (315 total, ~3.7/subject, zero non-English terms at all) was just too
+ * narrow to match a large fraction of real, clearly-relevant content
+ * (French/Spanish/Russian/German items could never match regardless of
+ * topic; many real English items didn't happen to contain one of the few
+ * exact narrow phrases). Not a bug -- a taxonomy coverage gap.
+ *
+ * Guarded by its own settings flag + version number (not just "has this
+ * ever run") so a *future* expansion of subjects.php's keyword lists can
+ * trigger another resync by bumping SUBJECT_KEYWORDS_VERSION, the same
+ * self-migrating shape as every other ensure_*() function in this file.
+ */
+const SUBJECT_KEYWORDS_VERSION = '2';
+
+function resync_subject_keywords(): void {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+
+    if (get_setting('subject_keywords_version', '') === SUBJECT_KEYWORDS_VERSION) {
+        return;
+    }
+
+    $seed = require __DIR__ . '/subjects.php';
+    $rows = db()->query('SELECT slug, keywords FROM subjects')->fetchAll();
+    $existingBySlug = [];
+    foreach ($rows as $row) {
+        $existingBySlug[$row['slug']] = array_filter(array_map('trim', explode(',', $row['keywords'])));
+    }
+
+    $stmt = db()->prepare('UPDATE subjects SET keywords = ? WHERE slug = ?');
+    foreach ($seed as $slug => $def) {
+        if ($slug === 'general' || !isset($existingBySlug[$slug])) {
+            continue; // 'general' stays empty on purpose; a slug not yet in the DB isn't this function's job
+        }
+        // Case-insensitive union -- avoids "climate change" and "Climate Change"
+        // both ending up in the same row if casing ever drifted between an
+        // admin edit and the seed file.
+        $existing = $existingBySlug[$slug];
+        $existingLower = array_map('mb_strtolower', $existing);
+        $merged = $existing;
+        foreach ($def['keywords'] as $kw) {
+            if (!in_array(mb_strtolower($kw), $existingLower, true)) {
+                $merged[] = $kw;
+                $existingLower[] = mb_strtolower($kw);
+            }
+        }
+        if (count($merged) !== count($existing)) {
+            $stmt->execute([implode(',', $merged), $slug]);
+        }
+    }
+
+    set_setting('subject_keywords_version', SUBJECT_KEYWORDS_VERSION);
+}
+
 function ensure_subjects_table(): void {
     static $checked = false;
     if ($checked) return;
@@ -1011,6 +1075,7 @@ function get_subjects(): array {
     }
 
     ensure_subjects_table();
+    resync_subject_keywords();
 
     $subjects = [];
     $rows = db()->query('SELECT slug, label, parent, keywords FROM subjects ORDER BY id ASC')->fetchAll();
@@ -1495,6 +1560,13 @@ function is_junk_title(string $title): bool {
         'title pending', 'untitled', 'no title', 'coming soon',
         '404', 'not found', 'page not found', 'access denied', 'forbidden',
         'just a moment', 'attention required', 'are you a robot', 'error',
+        // Confirmed on production (2026-08-13): a batch of real General-
+        // tagged items were bot-challenge/legal-boilerplate pages that
+        // slipped past the original patterns above, e.g. "Making sure
+        // you're not a bot!" -- a phrasing variant of the same underlying
+        // bot-challenge page the existing patterns already partly cover.
+        'not a bot', 'terms & conditions', 'terms and conditions',
+        'privacy policy', 'cookie policy', 'sign in to your account',
     ];
     foreach ($junkPatterns as $pattern) {
         if (str_contains($normalized, $pattern)) return true;
@@ -1533,7 +1605,15 @@ function looks_like_site_branding(string $title, string $host): bool {
     if (str_word_count($title) > 3) return false;
 
     $normalized = trim(mb_strtolower($title));
-    $genericHubTitles = ['home', 'homepage', 'welcome', 'journal home', 'main page', 'landing page', 'index'];
+    // 'events' and 'news' added after confirming on production (2026-08-13)
+    // that real crawled items included bare event-calendar and news-index
+    // landing pages with exactly these titles and nothing else -- same
+    // "site's own section header, not an article" pattern as the rest of
+    // this list.
+    $genericHubTitles = [
+        'home', 'homepage', 'welcome', 'journal home', 'main page', 'landing page', 'index',
+        'events', 'news', 'about us', 'contact us', 'credits',
+    ];
     if (in_array($normalized, $genericHubTitles, true)) return true;
 
     $normalizedTitle = preg_replace('/[^a-z0-9]/', '', $normalized);
