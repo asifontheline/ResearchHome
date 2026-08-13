@@ -1675,24 +1675,9 @@ function reclassify_general_backlog(int $limit, ?float $deadline = null): array 
     $stmt->execute();
     $rows = $stmt->fetchAll();
 
-    // TEMPORARY diagnostic logging -- reclassify_general_backlog() has
-    // reported upgraded=0, pruned=0 on every single production call for
-    // over a day (2000+ items checked cumulatively) despite this exact
-    // code succeeding in local/manual tests -- something specific to how
-    // this runs in production differs. Logs the taxonomy size once per
-    // call (rules out a poisoned/empty get_subjects() cache) and a
-    // per-item trace for the first few rows each call, straight to
-    // STDOUT so it lands in logs/validator_daemon.log automatically.
-    // Remove once the discrepancy is found.
-    $debugTaxonomyCount = count(get_subjects());
-    if (PHP_SAPI === 'cli') {
-        printf("%s [general-debug] taxonomy has %d subjects loaded\n", date('Y-m-d H:i:s'), $debugTaxonomyCount);
-    }
-
     $checked = 0;
     $upgraded = 0;
     $pruned = 0;
-    $debugLogged = 0;
     foreach ($rows as $row) {
         if ($deadline !== null && time_budget_exceeded($deadline)) break;
         $checked++;
@@ -1717,32 +1702,17 @@ function reclassify_general_backlog(int $limit, ?float $deadline = null): array 
             continue;
         }
 
-        $isDebugItem = $debugLogged < 5;
         $text = trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? ''));
-        $matches = classify_subjects($text, $isDebugItem);
-        $debugFetched = false;
-        $debugBodyLen = 0;
+        $matches = classify_subjects($text);
         if (!$matches) {
             $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
-            $debugFetched = $body !== null;
-            $debugBodyLen = $body ? strlen($body) : 0;
             if ($body) {
                 $enriched = enrich_from_fetched_body($body, $row['url']);
-                $matches = classify_subjects($text . ' ' . $enriched['synopsis'], $isDebugItem);
+                $matches = classify_subjects($text . ' ' . $enriched['synopsis']);
                 if (empty($row['language']) && $enriched['language']) {
                     db()->prepare('UPDATE items SET language = ? WHERE id = ?')->execute([$enriched['language'], (int) $row['id']]);
                 }
             }
-        }
-
-        if (PHP_SAPI === 'cli' && $debugLogged < 5) {
-            $debugLogged++;
-            printf(
-                "%s [general-debug] id=%d title=%s junk=%s brand=%s nonart=%s fetched=%s bodylen=%d matches=%d\n",
-                date('Y-m-d H:i:s'), (int) $row['id'], mb_substr((string) $row['title'], 0, 40),
-                $isJunkTitle ? 'Y' : 'n', $isBranding ? 'Y' : 'n', $isNonArticle ? 'Y' : 'n',
-                $debugFetched ? 'Y' : 'n', $debugBodyLen, count($matches)
-            );
         }
 
         if ($matches) {
