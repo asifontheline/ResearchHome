@@ -31,6 +31,19 @@ if (PHP_SAPI !== 'cli') {
 
 set_time_limit(0); // meant to run forever; no PHP-level cap to fight
 
+// Every one of this script's own log lines is already timestamped
+// (date('Y-m-d H:i:s') prefix on each printf), but a native PHP warning/
+// notice (e.g. from a library call deep inside a batch function) would
+// otherwise land in the same log via the `2>&1` redirect with no
+// timestamp at all, breaking the ability to line it up against
+// everything else happening at that moment. Prefixes one on, then hands
+// off to PHP's normal handling (return false) so nothing about actual
+// error behavior/reporting changes, just the log line's format.
+set_error_handler(function (int $errno, string $errstr, string $errfile = '', int $errline = 0): bool {
+    fwrite(STDERR, date('Y-m-d H:i:s') . " PHP: {$errstr} in {$errfile}:{$errline}\n");
+    return false;
+});
+
 const ITERATION_HARD_TIMEOUT_SECONDS = 30;
 // 0, not a few seconds -- explicit request to maximize throughput while
 // working through the General backlog. Each iteration already does real
@@ -76,7 +89,7 @@ if ($hasPcntl) {
 // still running -- that also means mark_stale_runs_as_crashed() and any
 // future "is the daemon alive" check can just look at this timestamp.
 if (!acquire_run_lock('validator', 1)) {
-    fwrite(STDERR, "Another validator process (daemon or cron-triggered validator.php) appears to be active. Not starting a second one.\n");
+    fwrite(STDERR, date('Y-m-d H:i:s') . " Another validator process (daemon or cron-triggered validator.php) appears to be active. Not starting a second one.\n");
     exit(1);
 }
 
