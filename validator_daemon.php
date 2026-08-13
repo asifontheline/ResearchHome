@@ -32,7 +32,13 @@ if (PHP_SAPI !== 'cli') {
 set_time_limit(0); // meant to run forever; no PHP-level cap to fight
 
 const ITERATION_HARD_TIMEOUT_SECONDS = 30;
-const SLEEP_SECONDS = 5;
+// 0, not a few seconds -- explicit request to maximize throughput while
+// working through the General backlog. Each iteration already does real
+// work (multiple sub-tasks, several HTTP fetches for anything that needs
+// a body) that takes real wall-clock time on its own, so removing the
+// artificial gap between iterations doesn't turn this into a true busy-
+// loop -- it just removes idle time that wasn't buying anything.
+const SLEEP_SECONDS = 0;
 const FLUSH_INTERVAL_SECONDS = 300; // 5 min -- matches the old cron cadence
 
 // General-reclassify also gets its own dedicated 10-minute sweep, on top
