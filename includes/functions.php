@@ -983,7 +983,29 @@ function arxiv_category_label(string $code): string {
  * trigger another resync by bumping SUBJECT_KEYWORDS_VERSION, the same
  * self-migrating shape as every other ensure_*() function in this file.
  */
-const SUBJECT_KEYWORDS_VERSION = '2';
+const SUBJECT_KEYWORDS_VERSION = '3';
+
+/**
+ * Version 3 correction: bare generic adjectives added in version 2 (aiming
+ * to broaden coverage) turned out to be exactly the same class of mistake
+ * as the original "law"/"regulation" false-positive bug -- confirmed on
+ * production (2026-08-17), 'historical' was mistagging unrelated articles
+ * History ("historical control group" in a clinical trial, "historical
+ * data" in any quantitative field). resync_subject_keywords() below only
+ * ever merges keywords IN, so removing them from includes/subjects.php
+ * alone doesn't retroactively strip them from rows a version-2 resync
+ * already merged them into -- this explicit removal list is the other
+ * half of that correction.
+ */
+const KEYWORD_REMOVALS = [
+    'history' => ['historical'],
+    'philosophy' => ['philosophical'],
+    'biology' => ['biological'],
+    'chemistry' => ['chemical'],
+    'economics' => ['economic'],
+    'mathematics' => ['mathematical'],
+    'statistics' => ['statistical'],
+];
 
 function resync_subject_keywords(): void {
     static $checked = false;
@@ -1018,9 +1040,29 @@ function resync_subject_keywords(): void {
                 $existingLower[] = mb_strtolower($kw);
             }
         }
-        if (count($merged) !== count($existing)) {
+
+        // Explicit removals (KEYWORD_REMOVALS) -- applied after the merge
+        // above, on the same row, so a correction and a genuinely new
+        // keyword can land in the same version bump.
+        if (isset(KEYWORD_REMOVALS[$slug])) {
+            $toRemove = array_map('mb_strtolower', KEYWORD_REMOVALS[$slug]);
+            $merged = array_values(array_filter($merged, fn($kw) => !in_array(mb_strtolower($kw), $toRemove, true)));
+        }
+
+        if ($merged !== $existing) {
             $stmt->execute([implode(',', $merged), $slug]);
         }
+    }
+
+    // Items already mistagged via a since-removed keyword (e.g. 'history'
+    // via 'historical') won't correct themselves until retag_backlog_batch()
+    // reviews them again -- but that cursor only sweeps the catalog once
+    // and then becomes a permanent no-op once it reaches the end. Resetting
+    // it forces a fresh full pass so every previously-mistagged item
+    // actually gets re-evaluated against the corrected keyword list,
+    // instead of waiting on a sweep that already finished.
+    if (KEYWORD_REMOVALS) {
+        set_setting('retag_cursor_v2', '0');
     }
 
     set_setting('subject_keywords_version', SUBJECT_KEYWORDS_VERSION);
