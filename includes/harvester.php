@@ -1675,9 +1675,24 @@ function reclassify_general_backlog(int $limit, ?float $deadline = null): array 
     $stmt->execute();
     $rows = $stmt->fetchAll();
 
+    // TEMPORARY diagnostic -- the taxonomy is confirmed expanded in the DB
+    // (subject_keywords_version reads back '3'), yet General still shows
+    // upgraded=0, pruned=0 on every sweep. Traces whether THIS call path
+    // actually sees the expanded keyword list, straight to STDOUT so it
+    // lands in logs/validator_daemon.log. Remove once the gap is found.
+    if (PHP_SAPI === 'cli') {
+        $debugSubjects = get_subjects();
+        $debugKwTotal = array_sum(array_map(fn($d) => count($d['keywords']), $debugSubjects));
+        printf(
+            "%s [reclassify-debug] subjects=%d total_keywords=%d\n",
+            date('Y-m-d H:i:s'), count($debugSubjects), $debugKwTotal
+        );
+    }
+
     $checked = 0;
     $upgraded = 0;
     $pruned = 0;
+    $debugLogged = 0;
     foreach ($rows as $row) {
         if ($deadline !== null && time_budget_exceeded($deadline)) break;
         $checked++;
@@ -1702,16 +1717,23 @@ function reclassify_general_backlog(int $limit, ?float $deadline = null): array 
             continue;
         }
 
+        $isDebugItem = $debugLogged < 5;
         $text = trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? ''));
-        $matches = classify_subjects($text);
+        $matches = classify_subjects($text, $isDebugItem);
         if (!$matches) {
             $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
             if ($body) {
                 $enriched = enrich_from_fetched_body($body, $row['url']);
-                $matches = classify_subjects($text . ' ' . $enriched['synopsis']);
+                $matches = classify_subjects($text . ' ' . $enriched['synopsis'], $isDebugItem);
                 if (empty($row['language']) && $enriched['language']) {
                     db()->prepare('UPDATE items SET language = ? WHERE id = ?')->execute([$enriched['language'], (int) $row['id']]);
                 }
+            }
+        }
+        if ($isDebugItem) {
+            $debugLogged++;
+            if (PHP_SAPI === 'cli') {
+                printf("%s [reclassify-debug] id=%d title=%s matches=%d\n", date('Y-m-d H:i:s'), (int) $row['id'], mb_substr((string) $row['title'], 0, 40), count($matches));
             }
         }
 
