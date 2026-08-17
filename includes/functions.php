@@ -1009,11 +1009,30 @@ const KEYWORD_REMOVALS = [
 
 function resync_subject_keywords(): void {
     static $checked = false;
+    // TEMPORARY diagnostic -- resync_subject_keywords() has verified
+    // correct in every local test but production's General backlog shows
+    // zero upgrades/prunes even on sweeps running well after this code
+    // deployed. Traces whether this function is even reached, and what
+    // version it sees, before deciding to skip or proceed. Remove once
+    // the gap between "works locally" and "no-ops in production" is found.
+    if (PHP_SAPI === 'cli') {
+        printf(
+            "%s [resync-debug] called, static-cached=%s, current db version=%s, target version=%s\n",
+            date('Y-m-d H:i:s'), $checked ? 'Y' : 'n', var_export(get_setting('subject_keywords_version', null), true), SUBJECT_KEYWORDS_VERSION
+        );
+    }
     if ($checked) return;
     $checked = true;
 
     if (get_setting('subject_keywords_version', '') === SUBJECT_KEYWORDS_VERSION) {
+        if (PHP_SAPI === 'cli') {
+            printf("%s [resync-debug] versions match, skipping resync.\n", date('Y-m-d H:i:s'));
+        }
         return;
+    }
+
+    if (PHP_SAPI === 'cli') {
+        printf("%s [resync-debug] version mismatch, proceeding with resync.\n", date('Y-m-d H:i:s'));
     }
 
     $seed = require __DIR__ . '/subjects.php';
@@ -1024,6 +1043,7 @@ function resync_subject_keywords(): void {
     }
 
     $stmt = db()->prepare('UPDATE subjects SET keywords = ? WHERE slug = ?');
+    $rowsUpdated = 0;
     foreach ($seed as $slug => $def) {
         if ($slug === 'general' || !isset($existingBySlug[$slug])) {
             continue; // 'general' stays empty on purpose; a slug not yet in the DB isn't this function's job
@@ -1051,7 +1071,11 @@ function resync_subject_keywords(): void {
 
         if ($merged !== $existing) {
             $stmt->execute([implode(',', $merged), $slug]);
+            $rowsUpdated++;
         }
+    }
+    if (PHP_SAPI === 'cli') {
+        printf("%s [resync-debug] resync loop finished, %d row(s) actually updated.\n", date('Y-m-d H:i:s'), $rowsUpdated);
     }
 
     // Items already mistagged via a since-removed keyword (e.g. 'history'
@@ -1066,6 +1090,12 @@ function resync_subject_keywords(): void {
     }
 
     set_setting('subject_keywords_version', SUBJECT_KEYWORDS_VERSION);
+    if (PHP_SAPI === 'cli') {
+        printf(
+            "%s [resync-debug] done, version now reads back as: %s\n",
+            date('Y-m-d H:i:s'), var_export(get_setting('subject_keywords_version', null), true)
+        );
+    }
 }
 
 function ensure_subjects_table(): void {
