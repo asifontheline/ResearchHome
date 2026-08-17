@@ -30,6 +30,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int)($_POST['id'] ?? 0);
         db()->prepare('UPDATE seed_urls SET active = 1, discovered = 0 WHERE id = ?')->execute([$id]);
         assign_next_seed_group($id);
+    } elseif ($action === 'approve_bulk') {
+        // Only ids that are ACTUALLY still pending review get touched --
+        // guards against a stale checkbox state re-approving something
+        // already handled (e.g. two admin tabs open at once), same
+        // "trust the DB, not the form" caution as the rest of this file.
+        $ids = array_filter(array_map('intval', (array) ($_POST['ids'] ?? [])));
+        if ($ids) {
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $stmt = db()->prepare("SELECT id FROM seed_urls WHERE id IN ({$placeholders}) AND discovered = 1 AND active = 0");
+            $stmt->execute($ids);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $pendingId) {
+                db()->prepare('UPDATE seed_urls SET active = 1, discovered = 0 WHERE id = ?')->execute([(int) $pendingId]);
+                assign_next_seed_group((int) $pendingId);
+            }
+        }
+    } elseif ($action === 'approve_all') {
+        // Snapshot the id list first rather than a single blanket UPDATE --
+        // assign_next_seed_group() has to run once per row (it's a
+        // round-robin cursor increment, not something a set-based UPDATE
+        // can do), and re-querying "still pending" after each iteration
+        // would be needless extra work when the initial pending list
+        // added seconds ago is already the right size to loop.
+        $ids = db()->query('SELECT id FROM seed_urls WHERE discovered = 1 AND active = 0')->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($ids as $pendingId) {
+            db()->prepare('UPDATE seed_urls SET active = 1, discovered = 0 WHERE id = ?')->execute([(int) $pendingId]);
+            assign_next_seed_group((int) $pendingId);
+        }
     } elseif ($action === 'toggle') {
         $id = (int)($_POST['id'] ?? 0);
         $current = db()->prepare('SELECT active FROM seed_urls WHERE id = ?');
@@ -74,11 +101,21 @@ require __DIR__ . '/includes/header.php';
     Proposed automatically by the source-discovery crawler — not crawled until you approve.
     See <a href="/credits.php">Credits</a> for how discovery works.
   </p>
+
+  <!-- Declared here, referenced by each checkbox's form="" attribute below --
+       lets the checkboxes live inside the same table cell as the per-row
+       approve/reject forms without illegally nesting <form> elements. -->
+  <form id="bulk-approve-form" method="post" onsubmit="return confirm('Approve every checked seed?');"></form>
+
   <table class="seed-table">
-    <thead><tr><th>URL</th><th>Discovered via</th><th>Proposed</th><th></th></tr></thead>
+    <thead><tr>
+      <th><input type="checkbox" id="pending-select-all" title="Select all"></th>
+      <th>URL</th><th>Discovered via</th><th>Proposed</th><th></th>
+    </tr></thead>
     <tbody>
       <?php foreach ($pending as $s): ?>
         <tr>
+          <td><input type="checkbox" class="pending-checkbox" name="ids[]" value="<?= (int)$s['id'] ?>" form="bulk-approve-form"></td>
           <td><a href="<?= h($s['url']) ?>" target="_blank" rel="noopener noreferrer"><?= h($s['url']) ?></a></td>
           <td><?= h($s['discovery_source']) ?></td>
           <td><?= h(substr($s['added_at'], 0, 10)) ?></td>
@@ -98,6 +135,20 @@ require __DIR__ . '/includes/header.php';
       <?php endforeach; ?>
     </tbody>
   </table>
+
+  <p class="inline-form">
+    <input type="hidden" name="action" value="approve_bulk" form="bulk-approve-form">
+    <button type="submit" form="bulk-approve-form">Approve selected</button>
+    <form method="post" class="inline-form" onsubmit="return confirm('Approve all <?= count($pending) ?> pending seeds?');">
+      <input type="hidden" name="action" value="approve_all">
+      <button type="submit">Approve all pending</button>
+    </form>
+  </p>
+  <script>
+    document.getElementById('pending-select-all')?.addEventListener('change', function () {
+      document.querySelectorAll('.pending-checkbox').forEach(function (cb) { cb.checked = this.checked; }, this);
+    });
+  </script>
 <?php endif; ?>
 
 <h2>Add a seed manually</h2>
