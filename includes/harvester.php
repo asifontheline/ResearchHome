@@ -1183,6 +1183,12 @@ function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
             // comment for what happened when this fetched eagerly.
             $hostRowCache = [];
             foreach ($links as $link) {
+                // WordPress-style date/category/tag/author/pagination/feed
+                // URLs are never individual articles -- skip queueing them
+                // at all rather than spending a fetch + insert-time check
+                // on something we already know isn't content.
+                if (is_wordpress_archive_url($link['url'])) continue;
+
                 $hash = url_hash($link['url']);
                 $linkHost = parse_url($link['url'], PHP_URL_HOST);
                 if (!$linkHost) continue;
@@ -1326,7 +1332,7 @@ function process_queue_batch(int $limit = 20, ?float $deadline = null): array {
             $meta = extract_generic_metadata($body, $row['url']);
             maybe_flag_hub_candidate($row['url'], $body, $hostIsNew);
 
-            if (!$meta['title'] || looks_like_site_branding($meta['title'], $row['host']) || is_non_article_host($row['host'])) {
+            if (!$meta['title'] || looks_like_site_branding($meta['title'], $row['host']) || is_non_article_host($row['host']) || is_wordpress_archive_url($row['url'])) {
                 db()->prepare("UPDATE crawl_queue SET status='skipped', processed_at=NOW() WHERE id=?")->execute([$row['id']]);
                 continue;
             }
@@ -1535,15 +1541,18 @@ function sweep_backlog_batch(int $limit, ?float $deadline = null): array {
         $checked++;
 
         // Retroactive junk check -- is_junk_title()/looks_like_site_branding()/
-        // is_non_article_host() only ever ran at insert time, so an item
-        // that predates one of these filters (or slipped through a gap one
+        // is_non_article_host()/is_wordpress_archive_url() only ever ran at
+        // insert time (the latter added 2026-08-18), so an item that
+        // predates one of these filters (or slipped through a gap one
         // later closed) would otherwise sit here forever, since no amount
         // of better subject-matching will ever give a non-article a real
         // tag. Confirmed on production: "ORCID" (orcid.org) was still
         // sitting in General despite matching looks_like_site_branding()
-        // today -- nothing had ever re-checked it since insertion.
+        // today -- nothing had ever re-checked it since insertion. Same
+        // for ~120 WordPress date/category archive pages from a single
+        // seed (archivalia.hypotheses.org), identifiable by URL path alone.
         $host = parse_url($row['url'], PHP_URL_HOST) ?: '';
-        if (is_junk_title($row['title'] ?? '') || looks_like_site_branding($row['title'] ?? '', $host) || is_non_article_host($host)) {
+        if (is_junk_title($row['title'] ?? '') || looks_like_site_branding($row['title'] ?? '', $host) || is_non_article_host($host) || is_wordpress_archive_url($row['url'])) {
             delete_item($lastId);
             $pruned++;
             continue;

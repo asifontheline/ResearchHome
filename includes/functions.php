@@ -1761,6 +1761,31 @@ function is_non_article_host(string $host): bool {
     return in_array($host, NON_ARTICLE_HOSTS, true);
 }
 
+/**
+ * WordPress (and WordPress-derived platforms like hypotheses.org, used by
+ * many academic blogs) auto-generates taxonomy/archive index URLs at
+ * predictable paths -- /date/2009/12, /category/foo, /tag/foo, /author/foo,
+ * /page/2 -- alongside real post URLs. These are never individual articles,
+ * regardless of title or language: a title-based check can't reliably tell
+ * "Bibliothekswesen" (a real German word that could theoretically be a
+ * genuine post title) from the identical string as a category-index page's
+ * auto-generated <title>, but the URL path itself is unambiguous either
+ * way. Confirmed on production (2026-08-18): a single seed
+ * (archivalia.hypotheses.org) had crawled ~120 of these instead of the
+ * blog's actual posts, all correctly identifiable by path alone --
+ * "Dezember 2009 – Archivalia" at /date/2009/12, "Bibliothekswesen –
+ * Archivalia" at /category/bibliothekswesen, etc. Host-agnostic by design,
+ * since this WordPress URL convention isn't specific to one seed and any
+ * WordPress-based source could hit the same failure mode.
+ */
+function is_wordpress_archive_url(string $url): bool {
+    $path = parse_url($url, PHP_URL_PATH) ?? '';
+    return (bool) preg_match(
+        '#/(date/\d{4}(/\d{1,2})?|category/[^/]+|tag/[^/]+|author/[^/]+|page/\d+|comments/feed|feed)/?$#i',
+        rtrim($path, '/') . '/'
+    );
+}
+
 function fetch_generic(string $url): ?array {
     $body = safe_http_get($url);
     if (!$body) return null;
