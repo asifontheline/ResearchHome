@@ -52,25 +52,38 @@
 // environmental science, music, communication studies, philosophy,
 // economics, medicine) -- still avoiding bare single generic words per the
 // rule above, just less narrowly conservative about it.
+//
+// Language-scoped keywords (2026-08-18): a keyword is either bare
+// ('history' -- universal, tested against every item regardless of its
+// detected language) or language-prefixed ('fr:histoire' -- tested only
+// when the item's items.language matches that prefix, or when the item's
+// language is unknown, in which case every keyword is tested as a safe
+// fallback). See parse_subject_keyword()/classify_subjects() in
+// functions.php. This replaces the earlier approach of just dumping
+// foreign-language synonyms in unprefixed, which worked (they still
+// matched) but couldn't be scoped -- a French word bare in the list would
+// also get tested against, say, a Russian-language item, which is harmless
+// (very unlikely to false-positive-match) but wastes matching passes and
+// isn't the properly-scoped-by-language behavior we actually want.
 
 return [
     // Mathematics & Physical Sciences
-    'mathematics' => ['label' => 'Mathematics', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['mathematics', 'topology', 'combinatorics', 'algebra', 'algebraic', 'number theory', 'differential equations', 'geometry', 'geometric', 'calculus', 'mathematical proof', 'theorem', 'mathematiques', 'matematicas', 'mathematik']],
-    'physics' => ['label' => 'Physics', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['physics', 'quantum', 'particle physics', 'astrophysics', 'cosmology', 'relativity', 'condensed matter', 'thermodynamics', 'electromagnetism', 'gravitational wave', 'string theory', 'physique', 'fisica', 'physik', 'физика']],
-    'chemistry' => ['label' => 'Chemistry', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['chemistry', 'catalysis', 'organic synthesis', 'chemical reaction', 'chemical compound', 'spectroscopy', 'molecular structure', 'chimie', 'quimica', 'chemie']],
-    'astronomy' => ['label' => 'Astronomy & Space', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['astronomy', 'exoplanet', 'galaxy', 'telescope', 'space mission', 'black hole', 'solar system', 'astrophysics', 'astronomie', 'astronomia']],
-    'earth-science' => ['label' => 'Earth Science', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['geology', 'seismology', 'volcanology', 'geophysics', 'earth science', 'tectonic', 'mineralogy', 'geologie', 'geologia']],
-    'statistics' => ['label' => 'Statistics', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['statistics', 'statistical inference', 'bayesian', 'data analysis', 'regression model', 'probability theory', 'statistique', 'estadistica']],
+    'mathematics' => ['label' => 'Mathematics', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['mathematics', 'topology', 'combinatorics', 'algebra', 'algebraic', 'number theory', 'differential equations', 'geometry', 'geometric', 'calculus', 'mathematical proof', 'theorem', 'fr:mathematiques', 'es:matematicas', 'de:mathematik']],
+    'physics' => ['label' => 'Physics', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['physics', 'quantum', 'particle physics', 'astrophysics', 'cosmology', 'relativity', 'condensed matter', 'thermodynamics', 'electromagnetism', 'gravitational wave', 'string theory', 'fr:physique', 'es:fisica', 'de:physik', 'ru:физика']],
+    'chemistry' => ['label' => 'Chemistry', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['chemistry', 'catalysis', 'organic synthesis', 'chemical reaction', 'chemical compound', 'spectroscopy', 'molecular structure', 'fr:chimie', 'es:quimica', 'de:chemie']],
+    'astronomy' => ['label' => 'Astronomy & Space', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['astronomy', 'exoplanet', 'galaxy', 'telescope', 'space mission', 'black hole', 'solar system', 'astrophysics', 'fr:astronomie', 'es:astronomia']],
+    'earth-science' => ['label' => 'Earth Science', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['geology', 'seismology', 'volcanology', 'geophysics', 'earth science', 'tectonic', 'mineralogy', 'fr:geologie', 'es:geologia']],
+    'statistics' => ['label' => 'Statistics', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['statistics', 'statistical inference', 'bayesian', 'data analysis', 'regression model', 'probability theory', 'fr:statistique', 'es:estadistica']],
     'optics' => ['label' => 'Optics & Photonics', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['optics', 'photonics', 'laser physics', 'optical fiber']],
     'meteorology' => ['label' => 'Meteorology', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['meteorology', 'atmospheric science', 'weather forecasting', 'climate variability']],
     'oceanography' => ['label' => 'Oceanography', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['oceanography', 'marine geology', 'ocean circulation', 'ocean current']],
     'nuclear-physics' => ['label' => 'Nuclear Physics', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['nuclear physics', 'particle accelerator', 'nuclear fission', 'nuclear fusion', 'radioactive decay']],
 
     // Computing & Engineering
-    'artificial-intelligence' => ['label' => 'Artificial Intelligence', 'parent' => 'Computing & Engineering', 'keywords' => ['artificial intelligence', 'machine learning', 'neural network', 'deep learning', 'large language model', 'reinforcement learning', 'generative model', 'computer vision', 'natural language processing', 'intelligence artificielle', 'inteligencia artificial', 'kunstliche intelligenz']],
-    'computer-science' => ['label' => 'Computer Science', 'parent' => 'Computing & Engineering', 'keywords' => ['algorithm', 'computer science', 'distributed systems', 'programming languages', 'cryptography', 'databases', 'software engineering', 'operating systems', 'compiler design', 'software development', 'informatique']],
+    'artificial-intelligence' => ['label' => 'Artificial Intelligence', 'parent' => 'Computing & Engineering', 'keywords' => ['artificial intelligence', 'machine learning', 'neural network', 'deep learning', 'large language model', 'reinforcement learning', 'generative model', 'computer vision', 'natural language processing', 'fr:intelligence artificielle', 'es:inteligencia artificial', 'de:kunstliche intelligenz']],
+    'computer-science' => ['label' => 'Computer Science', 'parent' => 'Computing & Engineering', 'keywords' => ['algorithm', 'computer science', 'distributed systems', 'programming languages', 'cryptography', 'databases', 'software engineering', 'operating systems', 'compiler design', 'software development', 'fr:informatique']],
     'robotics' => ['label' => 'Robotics', 'parent' => 'Computing & Engineering', 'keywords' => ['robotics', 'autonomous vehicle', 'robot manipulation', 'drone', 'autonomous system']],
-    'engineering' => ['label' => 'Engineering', 'parent' => 'Computing & Engineering', 'keywords' => ['mechanical engineering', 'civil engineering', 'aerospace engineering', 'structural engineering', 'engineering design', 'ingenierie', 'ingenieria']],
+    'engineering' => ['label' => 'Engineering', 'parent' => 'Computing & Engineering', 'keywords' => ['mechanical engineering', 'civil engineering', 'aerospace engineering', 'structural engineering', 'engineering design', 'fr:ingenierie', 'es:ingenieria']],
     'materials-science' => ['label' => 'Materials Science', 'parent' => 'Computing & Engineering', 'keywords' => ['materials science', 'nanomaterial', 'polymer', 'semiconductor', 'alloy', 'nanotechnology', 'thin film', 'crystal structure']],
     'cybersecurity' => ['label' => 'Cybersecurity', 'parent' => 'Computing & Engineering', 'keywords' => ['cybersecurity', 'network security', 'malware analysis', 'penetration testing', 'data privacy', 'encryption']],
     'data-science' => ['label' => 'Data Science', 'parent' => 'Computing & Engineering', 'keywords' => ['data science', 'data mining', 'predictive modeling', 'big data']],
@@ -81,11 +94,11 @@ return [
     'telecommunications' => ['label' => 'Telecommunications', 'parent' => 'Computing & Engineering', 'keywords' => ['telecommunications', 'wireless communication', '5g network', 'telecommunication network']],
 
     // Life Sciences & Medicine
-    'biology' => ['label' => 'Biology', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['biology', 'gene', 'genome', 'cell biology', 'protein', 'evolutionary biology', 'microbiology', 'molecular biology', 'organism', 'biologie', 'biologia']],
-    'medicine' => ['label' => 'Medicine & Health', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['medicine', 'clinical trial', 'disease', 'treatment', 'diagnosis', 'public health', 'epidemiology', 'patient outcome', 'healthcare', 'medical research', 'medecine', 'medicina', 'medizin', 'медицина', 'здоровье']],
-    'neuroscience' => ['label' => 'Neuroscience', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['neuroscience', 'brain', 'cognitive', 'neuron', 'neural circuit', 'neuroimaging', 'neurologie']],
+    'biology' => ['label' => 'Biology', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['biology', 'gene', 'genome', 'cell biology', 'protein', 'evolutionary biology', 'microbiology', 'molecular biology', 'organism', 'fr:biologie', 'es:biologia']],
+    'medicine' => ['label' => 'Medicine & Health', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['medicine', 'clinical trial', 'disease', 'treatment', 'diagnosis', 'public health', 'epidemiology', 'patient outcome', 'healthcare', 'medical research', 'fr:medecine', 'es:medicina', 'de:medizin', 'ru:медицина', 'ru:здоровье']],
+    'neuroscience' => ['label' => 'Neuroscience', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['neuroscience', 'brain', 'cognitive', 'neuron', 'neural circuit', 'neuroimaging', 'fr:neurologie']],
     'genetics' => ['label' => 'Genetics & Genomics', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['genetics', 'genomics', 'crispr', 'gene therapy', 'genetic variation', 'dna sequencing']],
-    'ecology' => ['label' => 'Ecology & Environment', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['ecology', 'biodiversity', 'ecosystem', 'conservation', 'species', 'habitat', 'ecologie', 'ecologia']],
+    'ecology' => ['label' => 'Ecology & Environment', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['ecology', 'biodiversity', 'ecosystem', 'conservation', 'species', 'habitat', 'fr:ecologie', 'es:ecologia']],
     'pharmacology' => ['label' => 'Pharmacology', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['pharmacology', 'drug development', 'pharmacokinetics', 'pharmaceutical']],
     'immunology' => ['label' => 'Immunology', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['immunology', 'immune response', 'vaccine development', 'autoimmune disease']],
     'toxicology' => ['label' => 'Toxicology', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['toxicology', 'toxicity assessment']],
@@ -98,21 +111,21 @@ return [
     'nutrition' => ['label' => 'Nutrition', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['nutrition science', 'dietary intake', 'nutritional epidemiology']],
 
     // Environment & Energy
-    'climate-science' => ['label' => 'Climate Science', 'parent' => 'Environment & Energy', 'keywords' => ['climate change', 'global warming', 'climate model', 'sea level', 'greenhouse gas', 'carbon emission', 'climate policy', 'changement climatique', 'cambio climatico']],
+    'climate-science' => ['label' => 'Climate Science', 'parent' => 'Environment & Energy', 'keywords' => ['climate change', 'global warming', 'climate model', 'sea level', 'greenhouse gas', 'carbon emission', 'climate policy', 'fr:changement climatique', 'es:cambio climatico']],
     'energy' => ['label' => 'Energy', 'parent' => 'Environment & Energy', 'keywords' => ['renewable energy', 'solar power', 'battery technology', 'nuclear energy', 'energy storage', 'power grid', 'wind energy', 'energy transition']],
     'agriculture' => ['label' => 'Agriculture & Food Science', 'parent' => 'Environment & Energy', 'keywords' => ['agriculture', 'crop science', 'food science', 'farming', 'agricultural production']],
-    'environmental-science' => ['label' => 'Environmental Science', 'parent' => 'Environment & Energy', 'keywords' => ['environmental science', 'pollution control', 'environmental policy', 'environmental impact', 'environnement', 'medio ambiente', 'umwelt']],
+    'environmental-science' => ['label' => 'Environmental Science', 'parent' => 'Environment & Energy', 'keywords' => ['environmental science', 'pollution control', 'environmental policy', 'environmental impact', 'fr:environnement', 'es:medio ambiente', 'de:umwelt']],
     'water-resources' => ['label' => 'Water Resources', 'parent' => 'Environment & Energy', 'keywords' => ['water resources', 'hydrology', 'water management']],
     'forestry' => ['label' => 'Forestry', 'parent' => 'Environment & Energy', 'keywords' => ['forestry', 'forest management', 'silviculture']],
     'sustainability' => ['label' => 'Sustainability', 'parent' => 'Environment & Energy', 'keywords' => ['sustainability', 'sustainable development', 'circular economy']],
 
     // Social Sciences
-    'economics' => ['label' => 'Economics', 'parent' => 'Social Sciences', 'keywords' => ['economics', 'econometrics', 'macroeconomic', 'trade policy', 'labor market', 'economic growth', 'economic policy', 'economie', 'economia']],
+    'economics' => ['label' => 'Economics', 'parent' => 'Social Sciences', 'keywords' => ['economics', 'econometrics', 'macroeconomic', 'trade policy', 'labor market', 'economic growth', 'economic policy', 'fr:economie', 'es:economia']],
     'finance' => ['label' => 'Finance', 'parent' => 'Social Sciences', 'keywords' => ['finance', 'asset pricing', 'financial market', 'investment strategy', 'risk management', 'corporate finance']],
-    'psychology' => ['label' => 'Psychology', 'parent' => 'Social Sciences', 'keywords' => ['psychology', 'behavioral science', 'mental health', 'cognitive behavior', 'psychological wellbeing', 'psychologie', 'psicologia']],
-    'sociology' => ['label' => 'Sociology', 'parent' => 'Social Sciences', 'keywords' => ['sociology', 'sociological', 'social inequality', 'social network analysis', 'demography', 'social structure', 'social movement', 'sociologie', 'sociologique', 'sociologia', 'социология']],
-    'political-science' => ['label' => 'Political Science', 'parent' => 'Social Sciences', 'keywords' => ['political science', 'governance', 'public policy', 'international relations', 'political theory', 'science politique', 'ciencia politica']],
-    'anthropology' => ['label' => 'Anthropology', 'parent' => 'Social Sciences', 'keywords' => ['anthropology', 'ethnography', 'cultural studies', 'anthropologie']],
+    'psychology' => ['label' => 'Psychology', 'parent' => 'Social Sciences', 'keywords' => ['psychology', 'behavioral science', 'mental health', 'cognitive behavior', 'psychological wellbeing', 'fr:psychologie', 'es:psicologia']],
+    'sociology' => ['label' => 'Sociology', 'parent' => 'Social Sciences', 'keywords' => ['sociology', 'sociological', 'social inequality', 'social network analysis', 'demography', 'social structure', 'social movement', 'fr:sociologie', 'fr:sociologique', 'es:sociologia', 'ru:социология']],
+    'political-science' => ['label' => 'Political Science', 'parent' => 'Social Sciences', 'keywords' => ['political science', 'governance', 'public policy', 'international relations', 'political theory', 'fr:science politique', 'es:ciencia politica']],
+    'anthropology' => ['label' => 'Anthropology', 'parent' => 'Social Sciences', 'keywords' => ['anthropology', 'ethnography', 'cultural studies', 'fr:anthropologie']],
     'urban-planning' => ['label' => 'Urban Planning', 'parent' => 'Social Sciences', 'keywords' => ['urban planning', 'city planning', 'transportation planning', 'housing policy']],
     'criminology' => ['label' => 'Criminology', 'parent' => 'Social Sciences', 'keywords' => ['criminology', 'crime prevention', 'criminal justice']],
     'gender-studies' => ['label' => 'Gender Studies', 'parent' => 'Social Sciences', 'keywords' => ['gender studies', 'feminist theory', 'gender equality']],
@@ -127,22 +140,22 @@ return [
     // legal system, and a bare substring/word match on either false-positive
     // tagged unrelated science articles as Law. Kept to legally-specific
     // compound phrases instead.
-    'law' => ['label' => 'Law', 'parent' => 'Humanities & Law', 'keywords' => ['legal', 'legislation', 'jurisprudence', 'case law', 'statute', 'regulatory compliance', 'government regulation', 'constitutional law', 'human rights law', 'droit international', 'derecho']],
-    'education' => ['label' => 'Education', 'parent' => 'Humanities & Law', 'keywords' => ['education', 'pedagogy', 'learning outcomes', 'curriculum', 'teaching practice', 'educational research', 'higher education', 'educacion']],
+    'law' => ['label' => 'Law', 'parent' => 'Humanities & Law', 'keywords' => ['legal', 'legislation', 'jurisprudence', 'case law', 'statute', 'regulatory compliance', 'government regulation', 'constitutional law', 'human rights law', 'fr:droit international', 'es:derecho']],
+    'education' => ['label' => 'Education', 'parent' => 'Humanities & Law', 'keywords' => ['education', 'pedagogy', 'learning outcomes', 'curriculum', 'teaching practice', 'educational research', 'higher education', 'es:educacion']],
     'dissertations-theses' => ['label' => 'Dissertations & Theses', 'parent' => 'Humanities & Law', 'keywords' => ['dissertation', 'thesis', 'theses', 'doctoral thesis', 'phd thesis']],
-    'linguistics' => ['label' => 'Linguistics', 'parent' => 'Humanities & Law', 'keywords' => ['linguistics', 'natural language', 'phonetics', 'syntax', 'sociolinguistics', 'linguistique']],
+    'linguistics' => ['label' => 'Linguistics', 'parent' => 'Humanities & Law', 'keywords' => ['linguistics', 'natural language', 'phonetics', 'syntax', 'sociolinguistics', 'fr:linguistique']],
     // 'historical' (bare adjective) removed after confirming on production
     // (2026-08-17) it was mistagging unrelated articles the same way bare
     // 'law'/'regulation' once did -- "historical control group" in a
     // clinical trial, "historical data" in any quantitative field, etc.
     // are everyday phrasing with nothing to do with the History subject.
-    'history' => ['label' => 'History', 'parent' => 'Humanities & Law', 'keywords' => ['history', 'archaeology', 'historiography', 'histoire', 'historia', 'geschichte', 'история']],
+    'history' => ['label' => 'History', 'parent' => 'Humanities & Law', 'keywords' => ['history', 'archaeology', 'historiography', 'fr:histoire', 'es:historia', 'de:geschichte', 'ru:история']],
     // 'philosophical' removed for the same reason -- "philosophical
     // implications of X" is common transitional phrasing across many
     // disciplines' writing, not specific to the Philosophy subject.
-    'philosophy' => ['label' => 'Philosophy', 'parent' => 'Humanities & Law', 'keywords' => ['philosophy', 'ethics', 'epistemology', 'metaphysics', 'philosophie', 'filosofia']],
+    'philosophy' => ['label' => 'Philosophy', 'parent' => 'Humanities & Law', 'keywords' => ['philosophy', 'ethics', 'epistemology', 'metaphysics', 'fr:philosophie', 'es:filosofia']],
     'religious-studies' => ['label' => 'Religious Studies', 'parent' => 'Humanities & Law', 'keywords' => ['religious studies', 'theology', 'comparative religion']],
-    'literature' => ['label' => 'Literature', 'parent' => 'Humanities & Law', 'keywords' => ['literary criticism', 'literary theory', 'comparative literature', 'literary analysis', 'poetry', 'novel', 'litterature', 'literatura']],
+    'literature' => ['label' => 'Literature', 'parent' => 'Humanities & Law', 'keywords' => ['literary criticism', 'literary theory', 'comparative literature', 'literary analysis', 'poetry', 'novel', 'fr:litterature', 'es:literatura']],
     'classics' => ['label' => 'Classics', 'parent' => 'Humanities & Law', 'keywords' => ['classical studies', 'ancient greek literature', 'latin literature']],
     'library-science' => ['label' => 'Library & Information Science', 'parent' => 'Humanities & Law', 'keywords' => ['library science', 'information science', 'archival studies']],
     'journalism' => ['label' => 'Journalism & Media', 'parent' => 'Humanities & Law', 'keywords' => ['journalism', 'media studies', 'broadcast journalism', 'news media']],
@@ -157,11 +170,11 @@ return [
     'real-estate' => ['label' => 'Real Estate', 'parent' => 'Business', 'keywords' => ['real estate investment', 'property management']],
 
     // Arts & Design
-    'visual-arts' => ['label' => 'Visual Arts', 'parent' => 'Arts & Design', 'keywords' => ['visual arts', 'painting technique', 'sculpture', 'contemporary art', 'art exhibition', 'art history', 'beaux-arts', 'bellas artes']],
+    'visual-arts' => ['label' => 'Visual Arts', 'parent' => 'Arts & Design', 'keywords' => ['visual arts', 'painting technique', 'sculpture', 'contemporary art', 'art exhibition', 'art history', 'fr:beaux-arts', 'es:bellas artes']],
     'design' => ['label' => 'Design', 'parent' => 'Arts & Design', 'keywords' => ['graphic design', 'industrial design', 'interior design', 'design thinking']],
     'architecture' => ['label' => 'Architecture', 'parent' => 'Arts & Design', 'keywords' => ['architecture', 'architectural design', 'urban design']],
     'performing-arts' => ['label' => 'Performing Arts', 'parent' => 'Arts & Design', 'keywords' => ['performing arts', 'theatre studies', 'dance studies']],
-    'musicology' => ['label' => 'Music & Musicology', 'parent' => 'Arts & Design', 'keywords' => ['musicology', 'music theory', 'ethnomusicology', 'musical composition', 'orchestral', 'choral', 'musique', 'musica']],
+    'musicology' => ['label' => 'Music & Musicology', 'parent' => 'Arts & Design', 'keywords' => ['musicology', 'music theory', 'ethnomusicology', 'musical composition', 'orchestral', 'choral', 'fr:musique', 'es:musica']],
     'film-studies' => ['label' => 'Film Studies', 'parent' => 'Arts & Design', 'keywords' => ['film studies', 'cinema studies', 'screenwriting', 'documentary film', 'cinema']],
 
     // Sports & Recreation

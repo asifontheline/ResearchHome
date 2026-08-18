@@ -9,13 +9,13 @@ it to a browsable, searchable, tag-filterable site. Items are metadata + a
 link to the original source — never a copy of the content.
 
 Runs on plain PHP + MySQL on ordinary web-hosted cPanel shared hosting.
-Almost everything is a page request or a short-lived cron invocation
-(harvest, discovery); the one exception is tag/URL validation, which
-runs continuously as a single long-lived `validator_daemon.php` process
-(started once via SSH, cron-watchdog-restarted if it ever dies) instead
-of a cron-batched job — small bounded slices of work every few seconds
-rather than one big batch every N minutes, so the backlog can't outpace
-it under high harvest volume.
+Everything is a page request or a short-lived cron invocation — harvest,
+discovery, and tag/URL validation (`validator.php`, every 5 min) alike.
+An earlier version ran validation as a long-lived `validator_daemon.php`
+process instead, on the theory that a persistent process couldn't fall
+behind under load the way a periodic batch could; in practice the host
+killed it every 10-20 minutes regardless (a host-level resource limit),
+making it behave like a worse-scheduled cron job anyway. See §4.5.
 
 ## 2. Non-goals
 
@@ -357,55 +357,68 @@ entirely. The fix is a subject-line marker (`[fdbk]`) the widget sets and
 the poller explicitly checks for — mark as seen, skip, no issue — rather
 than two channels that happen to coexist by accident.
 
-### 4.5 Continuous validator
+### 4.5 Validator (cron-driven, full-catalog sweep)
 
-Tag correction, zero-tag rescue, `General`-tag reclassification, language
-backfill, and link health (§4.2.2) all run as a single long-lived process,
-`validator_daemon.php` — not a cron batch like harvest/discovery. This is
-the one exception to the "page request or short-lived cron invocation"
-pattern described in §1: SSH access turned out to be available, making a
-genuinely continuous process possible, and the earlier cron-batched
-version (still available as
-`validator.php`/`run_validator()` for the admin "Run validator now" button
-and hosts without SSH) kept getting silently killed mid-run in
-production — confirmed via `ps aux` showing no live process despite
-`harvest_log` still reading "running…" — most likely a blocking DNS
-resolution that neither `CURLOPT_TIMEOUT` nor PHP's `set_time_limit()`
-can preempt, only a real signal can.
+Tag correction, zero-tag rescue, `General`-tag upgrade, junk-pruning,
+language backfill, and link health (§4.2.2) all run inside `validator.php`
+(`run_validator()`), a bounded cron batch on a 5-minute cadence — same
+shape as harvest/discovery, no exception to the "page request or
+short-lived cron invocation" pattern in §1.
 
-**Loop shape:** `while (!$shuttingDown) { ...small bounded slice of each
-sub-task...; sleep(5); }`. Each iteration is wrapped in a hard
-`pcntl_alarm()` interrupt (a `SIGALRM` handler that throws), not just the
-soft `time_budget_exceeded()` deadline check every batch function already
-has — confirmed as the mechanism actually needed, since the soft check
-alone couldn't stop the production hangs described above. Falls back to
-best-effort if the `pcntl` extension isn't loaded.
+**History:** an earlier version ran this as `validator_daemon.php`, a
+single long-lived SSH-started process (`while (!$shuttingDown) { ...small
+slice of each sub-task...; sleep(5); }`, hard `pcntl_alarm()` interrupts,
+`bin/validator_watchdog.sh` cron restarting it if killed) on the theory
+that a persistent process couldn't fall behind a fixed cron cadence under
+load. In practice the host killed the daemon every 10-20 minutes
+regardless — a host-level resource limit, confirmed via repeated `ps aux`
+checks over SSH showing it gone with no crash logged — which made it
+behave like a *badly* scheduled cron job anyway: worse than a real one,
+since a genuine cron entry is at least reliably re-invoked on a fixed
+cadence rather than restarted only whenever the watchdog next happened to
+notice it was gone. `validator_daemon.php` and `bin/validator_watchdog.sh`
+were retired; `validator.php` is now the only validator entrypoint.
 
-**Each of the 6 sub-tasks (validation-group backfill, link-check, retag,
-zero-tag rescue, General-reclassify, language backfill) runs in its own
-try/catch**, not one shared try/catch for the whole iteration — confirmed
-in production that a failure early in the sequence (a migration-ordering
-bug in `check_links_batch()`) silently skipped every task after it,
-including totally unrelated ones like General-reclassify, for as long as
-that bug was live. One bad sub-task should never be able to starve five
-healthy ones. `run_validator()` (the batch fallback) mirrors this with the
-same per-sub-task isolation.
+**Tag maintenance was also redesigned at the same time.** It used to be
+three separate functions (`retag_backlog_batch()`, reconciling tags
+against a monotonic id cursor; `classify_zero_tag_backlog()` and
+`reclassify_general_backlog()`, each sampling via `ORDER BY RAND() LIMIT
+n`) independently re-fetching overlapping sets of items on three
+schedules. RAND() sampling never guaranteed full backlog coverage — an
+item stuck behind a genuine classification failure could get resampled
+forever while other items were never drawn at all (confirmed on
+production: `reclassify_general_backlog()` reported real, non-zero
+`checked` counts sweep after sweep while the `General` count kept
+climbing regardless). `sweep_backlog_batch()` replaces all three with one
+function, one forward cursor (`sweep_cursor_v1`) over `items.id`, that
+wraps back to 0 once it reaches the end rather than becoming a permanent
+no-op — a genuine guarantee that every item gets reviewed every cycle, not
+a statistical approximation of one.
 
-Stats aggregate across iterations and flush to one `harvest_log` summary
-row every 5 minutes, not one row per few-second iteration — the same
-run-locking (`acquire_run_lock('validator', 1)`, refreshed as a heartbeat
-every iteration) and stale-run self-healing (`mark_stale_runs_as_crashed()`)
-as the cron-based jobs, so the display never gets stuck reading "running…"
-after a genuine crash.
+**Language-scoped classification** (§4.3.1 note, `classify_subjects()`
+in `includes/functions.php`): each item's `items.language` is now threaded
+into every classification call site (API harvest, generic crawl, and all
+three sub-tasks `sweep_backlog_batch()` folds together). Keywords in
+`includes/subjects.php` are either bare (tested against every item
+regardless of language) or language-prefixed (`fr:histoire`, tested only
+when the item's detected language matches, or when the language is
+unknown, in which case every keyword is tested as a safe fallback). This
+replaced an earlier approach of adding foreign-language synonyms as bare,
+unprefixed keywords — functionally fine (they still matched) but not
+scoped to the language they were actually written for.
 
-**Since a persistent process doesn't survive a host reboot or resource-limit
-kill the way a fresh cron invocation does**, `bin/validator_watchdog.sh`
-(cron, every 10 minutes, called via `/bin/sh <path>` rather than executing
-the script path directly — plain FTP deploys don't reliably preserve the
-executable bit) does a cheap `pgrep -f validator_daemon.php` check and
-restarts it if it's not running. Confirmed necessary in practice: a
-scheduled host reboot killed the daemon, and it needed exactly this
-watchdog to come back without manual intervention.
+**Each sub-task runs in its own try/catch**, not one shared try/catch for
+the whole run — confirmed in production that a failure early in the
+sequence (a migration-ordering bug in `check_links_batch()`) silently
+skipped every task after it, including totally unrelated ones, for as
+long as that bug was live. One bad sub-task should never be able to
+starve the others.
+
+Run-locking (`acquire_run_lock('validator', VALIDATOR_MAX_RUNTIME_MINUTES)`)
+and stale-run self-healing (`mark_stale_runs_as_crashed()`) are the same
+pattern as the other cron-based jobs, so the display never gets stuck
+reading "running…" after a genuine crash, and an occasional late/duplicate
+cron fire can't double-process the same rows.
 
 ## 5. Indexing / search-performance plan
 

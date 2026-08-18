@@ -983,7 +983,7 @@ function arxiv_category_label(string $code): string {
  * trigger another resync by bumping SUBJECT_KEYWORDS_VERSION, the same
  * self-migrating shape as every other ensure_*() function in this file.
  */
-const SUBJECT_KEYWORDS_VERSION = '3';
+const SUBJECT_KEYWORDS_VERSION = '4';
 
 /**
  * Version 3 correction: bare generic adjectives added in version 2 (aiming
@@ -996,15 +996,44 @@ const SUBJECT_KEYWORDS_VERSION = '3';
  * alone doesn't retroactively strip them from rows a version-2 resync
  * already merged them into -- this explicit removal list is the other
  * half of that correction.
+ *
+ * Version 4 (2026-08-18): the foreign-language keywords added in version 2
+ * were bare/unprefixed ('histoire', 'fisica', etc), which classify_subjects()
+ * now treats as universal rather than scoped to that language -- harmless,
+ * but not the actual per-language matching the taxonomy redesign calls for.
+ * includes/subjects.php now carries these as 'fr:histoire', 'es:fisica' etc;
+ * the bare originals are listed here so the merge-only resync can retire
+ * them, leaving only the properly language-scoped versions.
  */
 const KEYWORD_REMOVALS = [
-    'history' => ['historical'],
-    'philosophy' => ['philosophical'],
-    'biology' => ['biological'],
-    'chemistry' => ['chemical'],
-    'economics' => ['economic'],
-    'mathematics' => ['mathematical'],
-    'statistics' => ['statistical'],
+    'history' => ['historical', 'histoire', 'historia', 'geschichte', 'история'],
+    'philosophy' => ['philosophical', 'philosophie', 'filosofia'],
+    'biology' => ['biological', 'biologie', 'biologia'],
+    'chemistry' => ['chemical', 'chimie', 'quimica', 'chemie'],
+    'economics' => ['economic', 'economie', 'economia'],
+    'mathematics' => ['mathematical', 'mathematiques', 'matematicas', 'mathematik'],
+    'statistics' => ['statistical', 'statistique', 'estadistica'],
+    'physics' => ['physique', 'fisica', 'physik', 'физика'],
+    'astronomy' => ['astronomie', 'astronomia'],
+    'earth-science' => ['geologie', 'geologia'],
+    'artificial-intelligence' => ['intelligence artificielle', 'inteligencia artificial', 'kunstliche intelligenz'],
+    'computer-science' => ['informatique'],
+    'engineering' => ['ingenierie', 'ingenieria'],
+    'medicine' => ['medecine', 'medicina', 'medizin', 'медицина', 'здоровье'],
+    'neuroscience' => ['neurologie'],
+    'ecology' => ['ecologie', 'ecologia'],
+    'climate-science' => ['changement climatique', 'cambio climatico'],
+    'environmental-science' => ['environnement', 'medio ambiente', 'umwelt'],
+    'psychology' => ['psychologie', 'psicologia'],
+    'sociology' => ['sociologie', 'sociologique', 'sociologia', 'социология'],
+    'political-science' => ['science politique', 'ciencia politica'],
+    'anthropology' => ['anthropologie'],
+    'law' => ['droit international', 'derecho'],
+    'education' => ['educacion'],
+    'linguistics' => ['linguistique'],
+    'literature' => ['litterature', 'literatura'],
+    'visual-arts' => ['beaux-arts', 'bellas artes'],
+    'musicology' => ['musique', 'musica'],
 ];
 
 function resync_subject_keywords(): void {
@@ -1143,18 +1172,52 @@ function get_subjects(): array {
  * items per call into this while root-causing why production never
  * produces a single match despite obviously-classifiable real content.
  */
-function classify_subjects(string $text, bool $debug = false): array {
+/**
+ * A keyword entry is either bare ("history") -- universal, tested
+ * regardless of the item's detected language -- or language-tagged
+ * ("fr:histoire") -- only tested when the item's language matches (or is
+ * unknown, see classify_subjects()'s own comment on that fallback).
+ * Splitting this out since both classify_subjects() and any future admin-
+ * facing keyword tooling need the identical parse.
+ */
+function parse_subject_keyword(string $entry): array {
+    if (preg_match('/^([a-z]{2}):(.+)$/u', trim($entry), $m)) {
+        return ['lang' => $m[1], 'term' => trim($m[2])];
+    }
+    return ['lang' => null, 'term' => trim($entry)];
+}
+
+/**
+ * $lang: the item's own detected language (items.language, e.g. 'fr'),
+ * or null/empty when unknown. A language-tagged keyword ("fr:histoire")
+ * only gets tested when it matches $lang -- both more precise (a French
+ * phrase can never accidentally fire on an English article) and more
+ * complete (matching is scoped to the language actually being read,
+ * rather than one flat pile of every language's phrasing mixed together).
+ * Bare/unprefixed keywords are always tested regardless of $lang --
+ * that's every keyword this taxonomy had before language-tagging existed,
+ * so nothing already working regresses. When $lang is unknown, every
+ * keyword is tested (both universal and every language) -- safer to
+ * over-test than to silently classify nothing just because language
+ * detection itself came back empty.
+ */
+function classify_subjects(string $text, ?string $lang = null, bool $debug = false): array {
     $subjects = get_subjects();
     $originalLen = mb_strlen($text);
     $text = mb_strtolower($text);
     $loweredLen = mb_strlen($text);
+    $lang = $lang ? mb_strtolower(trim($lang)) : null;
     $matches = [];
     $keywordsTested = 0;
     $pcreErrors = 0;
     $firstPcreError = null;
     foreach ($subjects as $slug => $def) {
-        foreach ($def['keywords'] as $kw) {
-            $kw = mb_strtolower($kw);
+        foreach ($def['keywords'] as $kwEntry) {
+            $parsed = parse_subject_keyword($kwEntry);
+            if ($parsed['lang'] !== null && $lang !== null && $parsed['lang'] !== $lang) {
+                continue; // language-tagged keyword, item is a different known language -- skip
+            }
+            $kw = mb_strtolower($parsed['term']);
             $keywordsTested++;
             // Word-boundary match, not a raw substring search — plain
             // mb_strpos let single-word keywords fire inside unrelated
@@ -1179,8 +1242,8 @@ function classify_subjects(string $text, bool $debug = false): array {
     }
     if ($debug && PHP_SAPI === 'cli') {
         printf(
-            "%s [classify-debug] taxonomy_subjects=%d text_len=%d->%d(lowered) keywords_tested=%d pcre_errors=%d matches=%d%s\n",
-            date('Y-m-d H:i:s'), count($subjects), $originalLen, $loweredLen, $keywordsTested, $pcreErrors, count($matches),
+            "%s [classify-debug] taxonomy_subjects=%d lang=%s text_len=%d->%d(lowered) keywords_tested=%d pcre_errors=%d matches=%d%s\n",
+            date('Y-m-d H:i:s'), count($subjects), $lang ?? '(unknown)', $originalLen, $loweredLen, $keywordsTested, $pcreErrors, count($matches),
             $firstPcreError ? " first_pcre_error=[kw=\"{$firstPcreError['keyword']}\" msg=\"{$firstPcreError['pcre_error']}\"]" : ''
         );
     }

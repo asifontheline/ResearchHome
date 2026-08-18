@@ -266,7 +266,7 @@ function api_harvest_arxiv(string $subjectSlug, string $keyword, int $max = 8): 
             if ($term !== '') $arxivCategories[] = arxiv_category_label($term);
         }
 
-        $tags = array_unique(array_merge($arxivCategories, classify_subjects($title . ' ' . $abstract), array_filter([$subjectSlug])));
+        $tags = array_unique(array_merge($arxivCategories, classify_subjects($title . ' ' . $abstract, 'en'), array_filter([$subjectSlug])));
         $id = insert_item_if_new([
             'title' => $title, 'url' => $url,
             'authors' => implode(', ', $authors), 'abstract' => $abstract,
@@ -308,7 +308,8 @@ function api_harvest_crossref(string $subjectSlug, string $keyword, int $max = 8
         // many records — use them alongside our keyword classification rather
         // than only the one subject slug that produced this search.
         $crossrefSubjects = $msg['subject'] ?? [];
-        $tags = array_unique(array_merge($crossrefSubjects, classify_subjects($title . ' ' . $abstract), array_filter([$subjectSlug])));
+        $itemLang = isset($msg['language']) ? strtolower($msg['language']) : null;
+        $tags = array_unique(array_merge($crossrefSubjects, classify_subjects($title . ' ' . $abstract, $itemLang), array_filter([$subjectSlug])));
 
         $id = insert_item_if_new([
             'title' => $title, 'url' => $url,
@@ -317,7 +318,7 @@ function api_harvest_crossref(string $subjectSlug, string $keyword, int $max = 8
             'source_name' => $msg['publisher'] ?? 'Crossref',
             'published_date' => $published,
             'citation_count' => $msg['is-referenced-by-count'] ?? null,
-            'language' => isset($msg['language']) ? strtolower($msg['language']) : null,
+            'language' => $itemLang,
         ], $tags);
         if ($id) $added++;
     }
@@ -350,7 +351,7 @@ function api_harvest_pubmed(string $subjectSlug, string $keyword, int $max = 8):
         $meta = fetch_pubmed($pmid);
         if (!$meta || !$meta['title']) continue;
         $url = "https://pubmed.ncbi.nlm.nih.gov/{$pmid}/";
-        $tags = array_unique(array_merge(classify_subjects($meta['title']), array_filter([$subjectSlug])));
+        $tags = array_unique(array_merge(classify_subjects($meta['title'], $meta['language'] ?? null), array_filter([$subjectSlug])));
         $id = insert_item_if_new([
             'title' => $meta['title'], 'url' => $url,
             'authors' => $meta['authors'], 'abstract' => $meta['abstract'],
@@ -399,8 +400,9 @@ function api_harvest_openalex(string $subjectSlug, string $keyword, int $max = 8
         $authors = array_map(fn($a) => $a['author']['display_name'] ?? '', $work['authorships'] ?? []);
         $abstract = reconstruct_openalex_abstract($work['abstract_inverted_index'] ?? null);
         $topics = array_map(fn($t) => $t['display_name'] ?? '', $work['topics'] ?? []);
+        $itemLang = isset($work['language']) ? strtolower($work['language']) : null;
 
-        $tags = array_unique(array_merge(array_filter($topics), classify_subjects($title . ' ' . ($abstract ?? '')), array_filter([$subjectSlug])));
+        $tags = array_unique(array_merge(array_filter($topics), classify_subjects($title . ' ' . ($abstract ?? ''), $itemLang), array_filter([$subjectSlug])));
 
         $id = insert_item_if_new([
             'title' => $title, 'url' => $url,
@@ -409,7 +411,7 @@ function api_harvest_openalex(string $subjectSlug, string $keyword, int $max = 8
             'source_name' => $work['primary_location']['source']['display_name'] ?? 'OpenAlex',
             'published_date' => $work['publication_date'] ?? null,
             'citation_count' => $work['cited_by_count'] ?? null,
-            'language' => isset($work['language']) ? strtolower($work['language']) : null,
+            'language' => $itemLang,
         ], $tags);
         if ($id) $added++;
     }
@@ -485,7 +487,8 @@ function api_harvest_patentsview(string $subjectSlug, string $keyword, int $max 
         if (!$title || !$patentId) continue;
 
         $inventors = array_map(fn($i) => $i['inventor_name_last'] ?? '', $p['inventors'] ?? []);
-        $tags = array_unique(array_merge(classify_subjects($title . ' ' . ($p['patent_abstract'] ?? '')), array_filter([$subjectSlug])));
+        // USPTO filings; PatentsView doesn't report a language field but this is a safe assumption.
+        $tags = array_unique(array_merge(classify_subjects($title . ' ' . ($p['patent_abstract'] ?? ''), 'en'), array_filter([$subjectSlug])));
 
         $id = insert_item_if_new([
             'title' => $title,
@@ -494,7 +497,7 @@ function api_harvest_patentsview(string $subjectSlug, string $keyword, int $max 
             'abstract' => $p['patent_abstract'] ?? null,
             'source_name' => 'USPTO',
             'published_date' => $p['patent_date'] ?? null,
-            'language' => 'en', // USPTO filings; PatentsView doesn't report one but this is a safe assumption
+            'language' => 'en',
         ], $tags);
         if ($id) $added++;
     }
@@ -1338,7 +1341,7 @@ function process_queue_batch(int $limit = 20, ?float $deadline = null): array {
                 $classifyText .= ' ' . extract_body_text($body);
             }
             $subjects = array_filter([$row['subject_slug']]);
-            $subjects = array_unique(array_merge($subjects, classify_subjects($classifyText)));
+            $subjects = array_unique(array_merge($subjects, classify_subjects($classifyText, $meta['language'] ?? null)));
 
             $id = insert_item_if_new([
                 'title' => $meta['title'], 'url' => $row['url'],
@@ -1474,35 +1477,46 @@ function check_links_batch(int $limit = 8, ?float $deadline = null): array {
 }
 
 /**
- * One-time backlog cleanup for items tagged before classify_subjects()
- * switched to word-boundary matching (see includes/functions.php) --
- * reconciles each item's taxonomy tags (subjects.php slugs only; arXiv
- * categories, Crossref/OpenAlex subjects, and manually typed tags are left
- * alone) against what the fixed matcher would assign today. Runs a slice
- * per harvest via a persistent 'retag_cursor' setting (same cursor-in-
- * settings shape as subject_cursor/seed_group_cursor) so the full backlog
- * drains over several runs without a schema migration or a one-off admin
- * click. Naturally becomes a fast no-op forever once the cursor reaches the
- * end -- new items are already tagged correctly at insert time.
+ * Full-sweep tag maintenance: junk-pruning, tag reconciliation, zero-tag
+ * rescue, and General-upgrade, all in one per-item pass over the *entire*
+ * catalog in id order -- the single replacement for what used to be three
+ * separate functions (retag_backlog_batch(), classify_zero_tag_backlog(),
+ * reclassify_general_backlog()), which independently re-fetched and
+ * re-classified overlapping sets of items on three different schedules.
+ *
+ * Cursor-based ('sweep_cursor_v1' setting), not RAND()-sampled -- this is
+ * the direct fix for a real, confirmed production problem: RAND() LIMIT
+ * sampling never guarantees full backlog coverage, since nothing stops the
+ * same easy rows from being resampled repeatedly while a harder row is
+ * never drawn at all. A monotonic id cursor guarantees every item is
+ * actually visited. The earlier retag_backlog_batch() already used exactly
+ * this cursor shape for its own reconciliation pass, for the same reason
+ * (see its git history) -- this generalizes it to also subsume the other
+ * two functions' jobs instead of running three separate passes over
+ * overlapping rows.
+ *
+ * Wraps back to id 0 once the cursor reaches the end, rather than becoming
+ * a permanent no-op (which is what the old retag_backlog_batch() did) --
+ * this is meant to run indefinitely via a regular cron tick (validator.php,
+ * see run_validator()), the sole replacement for the retired
+ * validator_daemon.php, so the taxonomy's continued growth and language
+ * backfill's continued progress both keep getting applied to old items
+ * too, not just items inserted after this pass last reached them.
+ *
+ * 'general' is handled as a special case, not folded into the generic
+ * taxonomy-tag reconciliation loop: an item correctly still stuck on
+ * General (nothing else matched, even after a live re-fetch) would
+ * otherwise get its 'general' tag removed and immediately re-added every
+ * single sweep, for every still-General item, forever -- a wasted
+ * DELETE+INSERT on every pass for no behavioral change.
  */
-function retag_backlog_batch(int $limit, ?float $deadline = null): array {
+function sweep_backlog_batch(int $limit, ?float $deadline = null): array {
     $taxonomySlugs = array_keys(get_subjects());
 
-    // 'retag_cursor_v2', not 'retag_cursor' -- the first version of this
-    // pass (cursor key 'retag_cursor') could strip an item's only tag
-    // (a false positive) and leave it with zero tags total, orphaned: this
-    // batch's own cursor had already moved past that id by the time it
-    // happened, and the separate classify_zero_tag_backlog() cursor moves
-    // ~30x slower (live HTTP fetches vs. pure DB), so it could never catch
-    // up before more items got orphaned than it fixed. Confirmed on
-    // production: zero-tag items went 379 -> 1032 rather than shrinking.
-    // The new key restarts the sweep from id 0 with the inline rescue
-    // below, which closes that gap at the source instead of depending on
-    // a second, slower pass to clean up after the first.
-    $cursor = (int) get_setting('retag_cursor_v2', '0');
+    $cursor = (int) get_setting('sweep_cursor_v1', '0');
     $maxId = (int) db()->query('SELECT MAX(id) FROM items')->fetchColumn();
-    if ($maxId === 0 || $cursor >= $maxId) {
-        return ['checked' => 0, 'retagged' => 0, 'rescued' => 0, 'done' => true];
+    if ($maxId === 0) {
+        return ['checked' => 0, 'retagged' => 0, 'rescued' => 0, 'upgraded' => 0, 'pruned' => 0, 'wrapped' => false];
     }
 
     $stmt = db()->prepare('SELECT id, title, url, abstract, language FROM items WHERE id > ? ORDER BY id ASC LIMIT ' . (int) $limit);
@@ -1512,54 +1526,56 @@ function retag_backlog_batch(int $limit, ?float $deadline = null): array {
     $checked = 0;
     $retagged = 0;
     $rescued = 0;
+    $upgraded = 0;
+    $pruned = 0;
     $lastId = $cursor;
     foreach ($rows as $row) {
         $lastId = (int) $row['id'];
         if ($deadline !== null && time_budget_exceeded($deadline)) break;
         $checked++;
 
+        // Retroactive junk check -- is_junk_title()/looks_like_site_branding()/
+        // is_non_article_host() only ever ran at insert time, so an item
+        // that predates one of these filters (or slipped through a gap one
+        // later closed) would otherwise sit here forever, since no amount
+        // of better subject-matching will ever give a non-article a real
+        // tag. Confirmed on production: "ORCID" (orcid.org) was still
+        // sitting in General despite matching looks_like_site_branding()
+        // today -- nothing had ever re-checked it since insertion.
+        $host = parse_url($row['url'], PHP_URL_HOST) ?: '';
+        if (is_junk_title($row['title'] ?? '') || looks_like_site_branding($row['title'] ?? '', $host) || is_non_article_host($host)) {
+            delete_item($lastId);
+            $pruned++;
+            continue;
+        }
+
         $currentTags = get_item_tags($lastId);
         $currentTaxonomyTags = array_values(array_filter(
             $currentTags,
             fn($t) => in_array($t['slug'], $taxonomySlugs, true)
         ));
+        $currentNonGeneralTaxonomyTags = array_values(array_filter(
+            $currentTaxonomyTags,
+            fn($t) => $t['slug'] !== 'general'
+        ));
+        $hasGeneral = count($currentNonGeneralTaxonomyTags) < count($currentTaxonomyTags);
         $otherTagCount = count($currentTags) - count($currentTaxonomyTags);
-        $newMatches = classify_subjects(trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? '')));
 
-        $changed = false;
-        $removedTagIds = [];
-        foreach ($currentTaxonomyTags as $t) {
-            if (!in_array($t['slug'], $newMatches, true)) {
-                db()->prepare('DELETE FROM item_tags WHERE item_id = ? AND tag_id = ?')->execute([$lastId, $t['id']]);
-                $removedTagIds[] = $t['id'];
-                $changed = true;
-            }
-        }
-        if ($removedTagIds) {
-            prune_orphaned_tags($removedTagIds);
-        }
-        $currentTaxonomySlugs = array_column($currentTaxonomyTags, 'slug');
-        foreach (array_diff($newMatches, $currentTaxonomySlugs) as $slug) {
-            foreach (resolve_tag_ids($slug) as $tagId) {
-                db()->prepare('INSERT IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)')->execute([$lastId, $tagId]);
-            }
-            $changed = true;
-        }
-        if ($changed) $retagged++;
+        $text = trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? ''));
+        $lang = $row['language'] ?? null;
+        $newMatches = classify_subjects($text, $lang);
 
-        // This item has zero tags of any kind (not just zero taxonomy tags)
-        // once the reconciliation above lands -- rescue it right here with
-        // the same body-text fetch classify_zero_tag_backlog() does, rather
-        // than leaving it for a background scan that moves far slower than
-        // this one and may never reach it. Falls back to 'general'
-        // (subjects.php) if even that finds nothing, so this item is
-        // closed out for good instead of staying zero-tagged.
-        if ($otherTagCount === 0 && !$newMatches) {
+        // No keyword match from title/abstract alone -- worth a live body
+        // fetch before giving up. Folds together what used to be two
+        // separate re-fetch passes (classify_zero_tag_backlog()'s and
+        // reclassify_general_backlog()'s) into the one this item already
+        // gets here.
+        if (!$newMatches) {
             $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
-            $rescueMatches = [];
             if ($body) {
                 $enriched = enrich_from_fetched_body($body, $row['url']);
-                $rescueMatches = classify_subjects(trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? '')) . ' ' . $enriched['synopsis']);
+                if ($enriched['language']) $lang = $enriched['language'];
+                $newMatches = classify_subjects($text . ' ' . $enriched['synopsis'], $lang);
                 // Same fetch already parsed a language -- set it now rather
                 // than leaving backfill_language_batch() to redundantly
                 // re-fetch this exact URL later just to get it.
@@ -1567,166 +1583,53 @@ function retag_backlog_batch(int $limit, ?float $deadline = null): array {
                     db()->prepare('UPDATE items SET language = ? WHERE id = ?')->execute([$enriched['language'], $lastId]);
                 }
             }
-            set_item_tags($lastId, resolve_tag_ids(implode(',', $rescueMatches ?: ['general'])));
-            $rescued++;
         }
-    }
-    set_setting('retag_cursor_v2', (string) $lastId);
 
-    return ['checked' => $checked, 'retagged' => $retagged, 'rescued' => $rescued, 'done' => $lastId >= $maxId];
-}
-
-/**
- * Items with zero tags at all only reach that state via the generic seed
- * crawler (every API harvest path always attaches at least the subject slug
- * it was searching for) -- a seed with no subject_slug plus a page with no
- * description meta tag leaves classify_subjects() nothing to match. This
- * re-fetches each such item's URL, pulls a plain-text body snippet
- * (extract_body_text()), and reclassifies against title+abstract+body.
- * Own 'zero_tag_cursor' setting, same batched-background shape as
- * retag_backlog_batch(); a small limit since this does live HTTP fetches
- * (unlike the pure-DB retag pass).
- */
-function classify_zero_tag_backlog(int $limit, ?float $deadline = null): array {
-    // Randomly sampled from the live "currently zero tags" set every call --
-    // NOT a monotonic id cursor. A cursor here had the exact same failure
-    // mode as retag_backlog_batch()'s first version: any item the rescue
-    // fetch failed to classify (dead link, timeout, no matching keywords
-    // even with body text) sits behind a forward-only pointer forever,
-    // reported as "done" once the cursor outruns the table while genuinely
-    // unclassified items pile up behind it. Confirmed on production: this
-    // reported done=true with 730 zero-tag items still remaining. Same
-    // random-sampling fix already used by check_links_batch() for the same
-    // FIFO-starvation reason -- items that get tagged simply drop out of
-    // this query's result set, no bookkeeping needed to avoid reprocessing
-    // them, and nothing can ever get permanently stuck behind a stale cursor.
-    $stmt = db()->prepare(
-        'SELECT i.id, i.title, i.url, i.abstract, i.language FROM items i
-         LEFT JOIN item_tags it ON it.item_id = i.id
-         WHERE it.item_id IS NULL
-         ORDER BY RAND() LIMIT ' . (int) $limit
-    );
-    $stmt->execute();
-    $rows = $stmt->fetchAll();
-
-    $checked = 0;
-    $tagged = 0;
-    $fallback = 0;
-    foreach ($rows as $row) {
-        if ($deadline !== null && time_budget_exceeded($deadline)) break;
-        $checked++;
-
-        $text = trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? ''));
-        $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
-        if ($body) {
-            $enriched = enrich_from_fetched_body($body, $row['url']);
-            $text .= ' ' . $enriched['synopsis'];
-            if (empty($row['language']) && $enriched['language']) {
-                db()->prepare('UPDATE items SET language = ? WHERE id = ?')->execute([$enriched['language'], (int) $row['id']]);
+        $changed = false;
+        $removedTagIds = [];
+        foreach ($currentNonGeneralTaxonomyTags as $t) {
+            if (!in_array($t['slug'], $newMatches, true)) {
+                db()->prepare('DELETE FROM item_tags WHERE item_id = ? AND tag_id = ?')->execute([$lastId, $t['id']]);
+                $removedTagIds[] = $t['id'];
+                $changed = true;
             }
         }
-
-        $matches = classify_subjects($text);
-        if ($matches) {
-            set_item_tags((int) $row['id'], resolve_tag_ids(implode(',', $matches)));
-            $tagged++;
-        } else {
-            // No keyword match even with body text, or the fetch itself
-            // failed (dead link, timeout) -- 'general' (subjects.php)
-            // closes this out for good rather than leaving it to be
-            // resampled by RAND() forever. It drops out of the zero-tag
-            // query below either way, same as a real match would.
-            set_item_tags((int) $row['id'], resolve_tag_ids('general'));
-            $fallback++;
-        }
-    }
-
-    // No rows at all means the zero-tag set is genuinely empty right now --
-    // the only honest "done" signal under random sampling.
-    return ['checked' => $checked, 'tagged' => $tagged, 'fallback' => $fallback, 'done' => count($rows) === 0];
-}
-
-/**
- * 'general' is a fallback, not a resting state -- without something that
- * keeps trying to upgrade it, it's just "zero tags" wearing a label
- * (fair criticism, worth taking seriously). This retries classification
- * for items currently stuck on 'general', which can succeed now even
- * when it failed before for two independent reasons: the taxonomy grows
- * over time (subjects_admin.php lets an admin add new subjects any time,
- * and the seed list itself went 26 -> 85 subjects in one pass), and this
- * re-fetches the page fresh in case the original attempt hit a transient
- * failure rather than genuinely unclassifiable content.
- *
- * Random-sampled, not a cursor -- same FIFO-starvation reasoning as
- * classify_zero_tag_backlog(): an item that upgrades simply stops
- * matching this query, no bookkeeping needed, and nothing can get stuck
- * behind a stale pointer. Safe to keep running indefinitely as the
- * taxonomy keeps growing, unlike a one-shot cursor sweep that would need
- * manually restarting (a new cursor key) every time the taxonomy changes.
- */
-function reclassify_general_backlog(int $limit, ?float $deadline = null): array {
-    $stmt = db()->prepare(
-        "SELECT i.id, i.title, i.url, i.abstract, i.language FROM items i
-         JOIN item_tags it ON it.item_id = i.id
-         JOIN tags t ON t.id = it.tag_id
-         WHERE t.slug = 'general'
-         ORDER BY RAND() LIMIT " . (int) $limit
-    );
-    $stmt->execute();
-    $rows = $stmt->fetchAll();
-
-    $checked = 0;
-    $upgraded = 0;
-    $pruned = 0;
-    foreach ($rows as $row) {
-        if ($deadline !== null && time_budget_exceeded($deadline)) break;
-        $checked++;
-
-        // Retroactive junk check -- is_junk_title()/looks_like_site_branding()/
-        // is_non_article_host() only ever ran at insert time, so an item
-        // that predates one of these filters (or slipped through a gap one
-        // later closed) sits here forever, since no amount of better
-        // subject-matching will ever give a non-article a real tag.
-        // Confirmed on production: "ORCID" (orcid.org) was still sitting
-        // in General despite matching looks_like_site_branding() today --
-        // nothing had ever re-checked it since insertion. Deleting rather
-        // than reclassifying is correct here, same as the crawler's own
-        // insert-time skip for the identical signal.
-        $host = parse_url($row['url'], PHP_URL_HOST) ?: '';
-        $isJunkTitle = is_junk_title($row['title'] ?? '');
-        $isBranding = looks_like_site_branding($row['title'] ?? '', $host);
-        $isNonArticle = is_non_article_host($host);
-        if ($isJunkTitle || $isBranding || $isNonArticle) {
-            delete_item((int) $row['id']);
-            $pruned++;
-            continue;
-        }
-
-        $text = trim(($row['title'] ?? '') . ' ' . ($row['abstract'] ?? ''));
-        $matches = classify_subjects($text);
-        if (!$matches) {
-            $body = safe_http_get($row['url'], ['User-Agent: ' . HARVEST_USER_AGENT]);
-            if ($body) {
-                $enriched = enrich_from_fetched_body($body, $row['url']);
-                $matches = classify_subjects($text . ' ' . $enriched['synopsis']);
-                if (empty($row['language']) && $enriched['language']) {
-                    db()->prepare('UPDATE items SET language = ? WHERE id = ?')->execute([$enriched['language'], (int) $row['id']]);
-                }
+        $currentNonGeneralSlugs = array_column($currentNonGeneralTaxonomyTags, 'slug');
+        foreach (array_diff($newMatches, $currentNonGeneralSlugs) as $slug) {
+            foreach (resolve_tag_ids($slug) as $tagId) {
+                db()->prepare('INSERT IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)')->execute([$lastId, $tagId]);
             }
+            $changed = true;
         }
 
-        if ($matches) {
-            $itemId = (int) $row['id'];
-            $keepNames = array_map(
-                fn($t) => $t['name'],
-                array_filter(get_item_tags($itemId), fn($t) => $t['slug'] !== 'general')
-            );
-            set_item_tags($itemId, resolve_tag_ids(implode(',', array_merge($keepNames, $matches))));
+        if ($newMatches && $hasGeneral) {
+            // Upgraded away from the fallback -- drop 'general' now that a
+            // real subject matched.
+            foreach (resolve_tag_ids('general') as $tagId) {
+                db()->prepare('DELETE FROM item_tags WHERE item_id = ? AND tag_id = ?')->execute([$lastId, $tagId]);
+                $removedTagIds[] = $tagId;
+            }
             $upgraded++;
+            $changed = true;
+        } elseif (!$newMatches && $otherTagCount === 0 && !$hasGeneral) {
+            // Genuinely zero tags of any kind even after the rescue fetch
+            // above -- 'general' closes this out for good instead of
+            // leaving it zero-tagged until some future sweep.
+            set_item_tags($lastId, resolve_tag_ids('general'));
+            $rescued++;
+            $changed = false; // set_item_tags() already applied it directly
         }
+
+        if ($removedTagIds) {
+            prune_orphaned_tags($removedTagIds);
+        }
+        if ($changed) $retagged++;
     }
 
-    return ['checked' => $checked, 'upgraded' => $upgraded, 'pruned' => $pruned];
+    $wrapped = $lastId >= $maxId;
+    set_setting('sweep_cursor_v1', $wrapped ? '0' : (string) $lastId);
+
+    return ['checked' => $checked, 'retagged' => $retagged, 'rescued' => $rescued, 'upgraded' => $upgraded, 'pruned' => $pruned, 'wrapped' => $wrapped];
 }
 
 /**
@@ -2075,9 +1978,7 @@ function run_validator(): array {
     // long as that bug was live. A partial run (5 of 6 tasks succeeding)
     // is far better than a zero-progress run over one bad task.
     $groupBackfill = ['assigned' => 0];
-    $retag = ['checked' => 0, 'retagged' => 0, 'rescued' => 0];
-    $zeroTag = ['checked' => 0, 'tagged' => 0, 'fallback' => 0];
-    $general = ['checked' => 0, 'upgraded' => 0, 'pruned' => 0];
+    $sweep = ['checked' => 0, 'retagged' => 0, 'rescued' => 0, 'upgraded' => 0, 'pruned' => 0, 'wrapped' => false];
     $language = ['checked' => 0, 'detected' => 0];
     try {
         try {
@@ -2102,23 +2003,13 @@ function run_validator(): array {
         }
 
         try {
-            $retag = retag_backlog_batch(500, $deadline);
+            // 300, not the old 500/50/50 split across three separate
+            // passes -- one unified pass over more rows per tick, since
+            // this single call now does everything those three used to
+            // (junk-pruning, retagging, zero-tag rescue, General-upgrade).
+            $sweep = sweep_backlog_batch(300, $deadline);
         } catch (Throwable $e) {
-            $errors[] = 'Validator sub-task (retag) failed: ' . $e->getMessage();
-            try { db(true); } catch (Throwable $e2) {}
-        }
-
-        try {
-            $zeroTag = classify_zero_tag_backlog(50, $deadline);
-        } catch (Throwable $e) {
-            $errors[] = 'Validator sub-task (zero-tag rescue) failed: ' . $e->getMessage();
-            try { db(true); } catch (Throwable $e2) {}
-        }
-
-        try {
-            $general = reclassify_general_backlog(50, $deadline);
-        } catch (Throwable $e) {
-            $errors[] = 'Validator sub-task (General-reclassify) failed: ' . $e->getMessage();
+            $errors[] = 'Validator sub-task (backlog sweep) failed: ' . $e->getMessage();
             try { db(true); } catch (Throwable $e2) {}
         }
 
@@ -2130,11 +2021,9 @@ function run_validator(): array {
         }
 
         $errors[] = "Validator: link-check checked {$linksChecked}, validated {$linksValidated}, removed {$itemsRemoved}; "
-            . "reviewed {$retag['checked']} existing item(s), retagged {$retag['retagged']}, "
-            . "rescued {$retag['rescued']} newly-zero-tag; zero-tag scan checked {$zeroTag['checked']}, "
-            . "tagged {$zeroTag['tagged']}, fell back to General for {$zeroTag['fallback']}; "
-            . "General-reclassify checked {$general['checked']}, upgraded {$general['upgraded']}, "
-            . "pruned {$general['pruned']} non-articles; "
+            . "backlog sweep checked {$sweep['checked']}, retagged {$sweep['retagged']}, "
+            . "rescued {$sweep['rescued']} zero-tag, upgraded {$sweep['upgraded']} from General, "
+            . "pruned {$sweep['pruned']} non-articles" . ($sweep['wrapped'] ? ' (completed a full catalog pass, wrapped to start)' : '') . "; "
             . "language backfill checked {$language['checked']}, detected {$language['detected']}; "
             . "validation-group backfill assigned {$groupBackfill['assigned']}.";
     } catch (Throwable $e) {

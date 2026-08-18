@@ -92,14 +92,16 @@ architecture writeup.
 ### Keeping the catalog honest
 - **Reader-facing "Report broken link"** — no login, no GitHub issue; the
   script re-verifies the URL itself before removing anything
-- **Continuous tag/URL validator** — a single long-running daemon
-  (`validator_daemon.php`, started once via SSH, cron-watchdog-restarted if
-  it ever dies) instead of a periodic batch job: small bounded slices of
-  link-health checks, retagging, zero-tag rescue, `General`-upgrade, and
-  language backfill every few seconds, so validation can't fall behind
-  under high harvest volume the way a fixed cron cadence eventually would.
-  Each slice runs under a hard `pcntl_alarm()` interrupt, not just a soft
-  deadline check, so one hung network call can't wedge the whole process
+- **Cron-driven tag/URL validator** (`validator.php`, every 5 min) — one
+  unified full-catalog sweep (`sweep_backlog_batch()`) handling junk-pruning,
+  retagging, zero-tag rescue, and `General`-upgrade in a single per-item
+  pass, plus link-health checks and language backfill as separate sub-tasks
+  in the same run. A forward cursor over `items.id` that wraps back to 0
+  once it reaches the end guarantees every item actually gets reviewed each
+  cycle — not `ORDER BY RAND() LIMIT n` sampling, which never guaranteed
+  full coverage (an item stuck behind a classification failure could get
+  resampled forever while others were never drawn at all, confirmed on
+  production)
 - **Rotating link health checks** — every item gets a link-health pass on
   a predictable ~hourly cadence (6 rotating groups, 10-minute windows,
   not random sampling that only statistically approaches full coverage),
@@ -137,9 +139,6 @@ architecture writeup.
 - **Email monitoring digest** — self-expiring hourly status report (stuck
   runs, cron-not-firing detection, last N runs), rides along on the existing
   cron rather than needing its own
-- **Watchdog cron for the validator daemon** — a lightweight `pgrep` check
-  every ~10 minutes restarts `validator_daemon.php` if it's ever gone
-  (host resource limit, OOM kill, reboot); does no validation work itself
 - **Admin "run now"** buttons for on-demand harvest/discovery/validator
   runs outside the regular cron cadence
 - **CI/CD via GitHub Actions** — push to `main` auto-deploys over FTPS,
@@ -217,9 +216,7 @@ tags.php / credits.php  Full tag directory; publisher/source credits + blocked-s
 videos.php             Optional video section (YouTube/Vimeo), separate from the research catalog
 harvest.php            Content harvest entrypoint — run by cron, or on-demand from harvest_log.php
 discover.php           Source-discovery entrypoint — separate cron/cadence from harvest.php
-validator.php          One-batch tag/URL validation entrypoint — on-demand ("Run validator now") or cron fallback
-validator_daemon.php   Continuous tag/URL validator — the normal way validation runs, see "Deploying" below
-bin/validator_watchdog.sh  Cron script: restarts validator_daemon.php if it's ever not running
+validator.php          Tag/URL validation entrypoint — cron ("Deploying" step 6b) or on-demand ("Run validator now")
 seeds.php              Admin: manage crawler seed/hub URLs (incl. discovered-seed review)
 subjects_admin.php     Admin: add/edit/delete the subject taxonomy (DB-backed, no deploy needed)
 subject_edit.php       Admin: edit one subject's label/parent/keywords
@@ -272,14 +269,11 @@ GitHub Actions workflow, **Deploy via FTP**:
   shell access assumed) that turned into a genuinely simpler deploy story:
   push to `main`, the next page load or cron tick that touches the
   changed table brings the schema up to date on its own.
-- **The one thing this workflow can't do**: restart `validator_daemon.php`
-  (see "Deploying" step 6b) — a running PHP process doesn't pick up
-  changed code on disk. After a deploy that touches `validator_daemon.php`
-  itself, `kill` the running PID over SSH; the watchdog cron (or a manual
-  `nohup ... &`) brings it back up on the new code within ~10 minutes.
-  Everything else (page requests, cron-invoked `harvest.php`/`discover.php`/
-  `validator.php`) always runs the latest deployed code automatically,
-  since PHP re-reads the file from disk on every request/invocation.
+- **Nothing needs restarting after a deploy.** Every entry point (page
+  requests, cron-invoked `harvest.php`/`discover.php`/`validator.php`)
+  always runs the latest deployed code automatically, since PHP re-reads
+  the file from disk on every request/invocation — no long-lived process
+  to `kill` and bring back up on the new code, since there isn't one.
 
 ## Deploying to web-hosted cPanel shared hosting
 
@@ -359,29 +353,36 @@ GitHub Actions workflow, **Deploy via FTP**:
    every 30 minutes just means a new source gets picked up promptly once a
    day rather than fetching anything more often than that.
 
-6b. **Start the continuous validator (requires SSH; no direct cPanel
-    equivalent).** Tag correction, zero-tag rescue, link-health checks, and
-    language backfill run as their own long-lived process rather than a
-    cron batch, so they can't fall behind under high harvest volume. Over
-    SSH, from the app directory:
+6b. **Add the validator cron.** Tag correction (junk-pruning, retagging,
+    zero-tag rescue, General-upgrade — all one pass, see
+    `sweep_backlog_batch()`), link-health checks, and language backfill run
+    as a normal bounded cron batch, same shape as `harvest.php`/`discover.php`:
     ```
-    nohup php validator_daemon.php >> logs/validator_daemon.log 2>&1 &
+    Command:  /usr/bin/php /home/YOURUSER/public_html/PATH/validator.php >> /home/YOURUSER/public_html/PATH/logs/validator.log 2>&1
+    Schedule: */5 * * * *       (every 5 minutes)
     ```
-    Then add a watchdog cron so it restarts itself if the host ever kills
-    it (OOM, wall-clock/resource limit, reboot) — this one *does* go in
-    cPanel's Cron Jobs, since it's just a cheap periodic check, not the
-    long-lived process itself:
-    ```
-    Command:  /bin/sh /home/YOURUSER/public_html/PATH/bin/validator_watchdog.sh
-    Schedule: */10 * * * *       (every 10 minutes)
-    ```
-    Calling it via `/bin/sh <path>` rather than executing the script path
-    directly avoids depending on the execute bit surviving an FTP deploy.
-    Skipping this step entirely still works — `validator.php` (a single
-    bounded batch, same logic, no daemon) runs from the admin "Run
-    validator now" button and could be cron'd the conventional way instead
-    if you'd rather not run a persistent process at all — it just won't
-    keep up as well once harvest volume is high.
+    A run-lock (`VALIDATOR_MAX_RUNTIME_MINUTES`, 4) keeps overlapping runs
+    from double-processing the same rows even if the host occasionally
+    fires cron late or out of cadence.
+
+    Earlier versions of ResHub ran this as `validator_daemon.php`, a
+    long-lived background process kept alive by a watchdog cron, on the
+    theory that a persistent process couldn't fall behind under load the
+    way a periodic batch could. In practice the host killed the daemon
+    every 10-20 minutes regardless (a host-level resource limit, not
+    anything fixable in the code), which made it behave like a *badly*
+    scheduled cron job anyway — worse, since a genuine cron entry is at
+    least reliably invoked on a fixed cadence rather than restarted
+    whenever the watchdog next happened to notice it was gone. The backlog
+    sweep itself was also redesigned around the same time: it used to
+    sample `ORDER BY RAND() LIMIT n`, which never actually guaranteed every
+    item got reviewed (an item stuck behind a classification failure could
+    get resampled forever while others were never drawn at all — confirmed
+    on production). `sweep_backlog_batch()` replaced that with a plain
+    forward cursor over `items.id` that wraps back to 0 once it reaches the
+    end, so a full pass over the whole catalog is guaranteed every cycle,
+    same cursor shape `harvest.php`'s seed-group rotation already uses.
+    `validator_daemon.php` and `bin/validator_watchdog.sh` no longer exist.
 
 7. **Add a few seed URLs — or let the harvester find them.**
    Log in → *Seeds* → add hub/listing pages yourself (e.g. an arXiv category
