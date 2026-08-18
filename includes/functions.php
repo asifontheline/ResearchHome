@@ -1607,6 +1607,26 @@ function fetch_arxiv(string $arxivId): ?array {
     ];
 }
 
+/**
+ * Pulls AbstractText from a PubMed efetch XML response -- structured
+ * abstracts (the NLM norm for clinical/trial articles) split this across
+ * several <AbstractText Label="BACKGROUND">/"METHODS"/"RESULTS"/
+ * "CONCLUSIONS" elements rather than one block, so every one gets joined
+ * rather than just taking the first.
+ */
+function extract_pubmed_abstract(string $xml): ?string {
+    $doc = @simplexml_load_string($xml);
+    if (!$doc) return null;
+    $parts = [];
+    foreach ($doc->xpath('//AbstractText') ?: [] as $node) {
+        $text = trim((string) $node);
+        if ($text === '') continue;
+        $label = trim((string) ($node['Label'] ?? ''));
+        $parts[] = $label !== '' ? "{$label}: {$text}" : $text;
+    }
+    return $parts ? implode(' ', $parts) : null;
+}
+
 function fetch_pubmed(string $pmid): ?array {
     $key = defined('NCBI_API_KEY') && NCBI_API_KEY ? '&api_key=' . urlencode(NCBI_API_KEY) : '';
     $contact = defined('CONTACT_EMAIL') ? '&tool=researchhome&email=' . urlencode(CONTACT_EMAIL) : '';
@@ -1616,10 +1636,24 @@ function fetch_pubmed(string $pmid): ?array {
     $doc = $data['result'][$pmid] ?? null;
     if (!$doc) return null;
     $authors = array_map(fn($a) => $a['name'] ?? '', $doc['authors'] ?? []);
+
+    // esummary (above) never includes abstract text at all -- confirmed on
+    // production (2026-08-18) this was leaving PubMed items with nothing
+    // but the bare title for classify_subjects() to match keywords
+    // against, pushing a meaningful share of otherwise-classifiable
+    // biomedical content into General for lack of any abstract text, not
+    // because the taxonomy couldn't have matched it. efetch's XML format
+    // (unlike esummary) does include the full abstract.
+    $abstract = null;
+    $abstractBody = safe_http_get("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={$pmid}&rettype=abstract&retmode=xml{$key}{$contact}");
+    if ($abstractBody) {
+        $abstract = extract_pubmed_abstract($abstractBody);
+    }
+
     return [
         'title' => $doc['title'] ?? null,
         'authors' => implode(', ', array_filter($authors)),
-        'abstract' => null, // esummary doesn't include abstract; user can fill via efetch if needed
+        'abstract' => $abstract,
         'published_date' => isset($doc['pubdate']) ? date('Y-m-d', strtotime($doc['pubdate'])) : null,
         'source_name' => 'PubMed',
         'image_url' => null,
@@ -1706,6 +1740,10 @@ function is_junk_title(string $title): bool {
         // subject happens to be -- no amount of taxonomy expansion will
         // ever turn a listing page into classifiable article content.
         'faculty digital archive',
+        // theconversation.com's own donor-acknowledgment page, same
+        // "site's-own-page, not an article" pattern as 'funding and
+        // tenders' above -- confirmed on production (2026-08-18).
+        'donors to the conversation',
     ];
     foreach ($junkPatterns as $pattern) {
         if (str_contains($normalized, $pattern)) return true;
@@ -1802,12 +1840,20 @@ function is_non_article_host(string $host): bool {
  * "Dezember 2009 – Archivalia" at /date/2009/12, "Bibliothekswesen –
  * Archivalia" at /category/bibliothekswesen, etc. Host-agnostic by design,
  * since this WordPress URL convention isn't specific to one seed and any
- * WordPress-based source could hit the same failure mode.
+ * WordPress-based source could hit the same failure mode -- confirmed the
+ * same day on a second, unrelated platform: spectrum.ieee.org uses the
+ * identical convention for its own content-type index pages, just with
+ * 'type' instead of 'category'/'tag' ('type/whitepaper', 'type/sponsored',
+ * 'type/profile', 'type/interview'). Real spectrum.ieee.org articles use
+ * plain slug URLs with no 'type/' segment at all (e.g.
+ * /x-square-robot-embodied-ai-stack), so this doesn't risk the genuine
+ * articles on that same host. Not WordPress-specific despite the function's
+ * origin -- named for what it detects, not which platform inspired it.
  */
-function is_wordpress_archive_url(string $url): bool {
+function is_listing_page_url(string $url): bool {
     $path = parse_url($url, PHP_URL_PATH) ?? '';
     return (bool) preg_match(
-        '#/(date/\d{4}(/\d{1,2})?|category/[^/]+|tag/[^/]+|author/[^/]+|page/\d+|comments/feed|feed)/?$#i',
+        '#/(date/\d{4}(/\d{1,2})?|category/[^/]+|tag/[^/]+|author/[^/]+|type/[^/]+|page/\d+|comments/feed|feed)/?$#i',
         rtrim($path, '/') . '/'
     );
 }

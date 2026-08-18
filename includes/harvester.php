@@ -340,10 +340,11 @@ function api_harvest_pubmed(string $subjectSlug, string $keyword, int $max = 8):
     if (!$ids) return ['added' => 0];
 
     // NCBI caps unauthenticated callers at 3 req/sec (10/sec with an API
-    // key) — each fetch_pubmed() below is its own esummary request against
-    // the same host as the esearch call above, so a tight loop without this
-    // could exceed that within a single harvest run.
-    $minIntervalMicroseconds = (defined('NCBI_API_KEY') && NCBI_API_KEY) ? 110000 : 350000;
+    // key) — fetch_pubmed() below now issues TWO requests per call (an
+    // esummary for title/authors/date/language, an efetch for abstract
+    // text esummary never includes), so the per-pmid interval is doubled
+    // from what a single request would need.
+    $minIntervalMicroseconds = (defined('NCBI_API_KEY') && NCBI_API_KEY) ? 220000 : 700000;
 
     $added = 0;
     foreach ($ids as $pmid) {
@@ -351,7 +352,7 @@ function api_harvest_pubmed(string $subjectSlug, string $keyword, int $max = 8):
         $meta = fetch_pubmed($pmid);
         if (!$meta || !$meta['title']) continue;
         $url = "https://pubmed.ncbi.nlm.nih.gov/{$pmid}/";
-        $tags = array_unique(array_merge(classify_subjects($meta['title'], $meta['language'] ?? null), array_filter([$subjectSlug])));
+        $tags = array_unique(array_merge(classify_subjects(trim($meta['title'] . ' ' . ($meta['abstract'] ?? '')), $meta['language'] ?? null), array_filter([$subjectSlug])));
         $id = insert_item_if_new([
             'title' => $meta['title'], 'url' => $url,
             'authors' => $meta['authors'], 'abstract' => $meta['abstract'],
@@ -1187,7 +1188,7 @@ function crawl_due_seeds(int $limit = 200, ?float $deadline = null): array {
                 // URLs are never individual articles -- skip queueing them
                 // at all rather than spending a fetch + insert-time check
                 // on something we already know isn't content.
-                if (is_wordpress_archive_url($link['url'])) continue;
+                if (is_listing_page_url($link['url'])) continue;
 
                 $hash = url_hash($link['url']);
                 $linkHost = parse_url($link['url'], PHP_URL_HOST);
@@ -1332,7 +1333,7 @@ function process_queue_batch(int $limit = 20, ?float $deadline = null): array {
             $meta = extract_generic_metadata($body, $row['url']);
             maybe_flag_hub_candidate($row['url'], $body, $hostIsNew);
 
-            if (!$meta['title'] || looks_like_site_branding($meta['title'], $row['host']) || is_non_article_host($row['host']) || is_wordpress_archive_url($row['url'])) {
+            if (!$meta['title'] || looks_like_site_branding($meta['title'], $row['host']) || is_non_article_host($row['host']) || is_listing_page_url($row['url'])) {
                 db()->prepare("UPDATE crawl_queue SET status='skipped', processed_at=NOW() WHERE id=?")->execute([$row['id']]);
                 continue;
             }
@@ -1541,7 +1542,7 @@ function sweep_backlog_batch(int $limit, ?float $deadline = null): array {
         $checked++;
 
         // Retroactive junk check -- is_junk_title()/looks_like_site_branding()/
-        // is_non_article_host()/is_wordpress_archive_url() only ever ran at
+        // is_non_article_host()/is_listing_page_url() only ever ran at
         // insert time (the latter added 2026-08-18), so an item that
         // predates one of these filters (or slipped through a gap one
         // later closed) would otherwise sit here forever, since no amount
@@ -1552,7 +1553,7 @@ function sweep_backlog_batch(int $limit, ?float $deadline = null): array {
         // for ~120 WordPress date/category archive pages from a single
         // seed (archivalia.hypotheses.org), identifiable by URL path alone.
         $host = parse_url($row['url'], PHP_URL_HOST) ?: '';
-        if (is_junk_title($row['title'] ?? '') || looks_like_site_branding($row['title'] ?? '', $host) || is_non_article_host($host) || is_wordpress_archive_url($row['url'])) {
+        if (is_junk_title($row['title'] ?? '') || looks_like_site_branding($row['title'] ?? '', $host) || is_non_article_host($host) || is_listing_page_url($row['url'])) {
             delete_item($lastId);
             $pruned++;
             continue;
