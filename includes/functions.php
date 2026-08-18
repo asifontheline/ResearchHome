@@ -1685,6 +1685,27 @@ function is_junk_title(string $title): bool {
         // way looks_like_site_branding() already catches shorter ones, for
         // a title too long to hit that function's <=3-word gate.
         'journal metrics', 'funding and tenders', 'official website', 'επίσημος ιστότοπος',
+        // Confirmed on production (2026-08-18): OpenEdition-hosted blogs
+        // (hypotheses.org, revues.org, and others on the same platform --
+        // it's the same network archivalia.hypotheses.org, the source of
+        // that day's other cleanup, is part of) all share an identical set
+        // of French-language footer/legal pages, repeated verbatim across
+        // every blog on the platform -- cookie notice, privacy policy,
+        // terms of use, credits, and the platform's own report-abuse page.
+        // None of these are ever an article, on any of the hundreds of
+        // blogs the platform hosts, so this is a platform-wide pattern,
+        // not specific to one seed.
+        'gestion des cookies', 'données personnelles', 'mentions légales',
+        'conditions générales d\'utilisation', 'les services d\'openedition',
+        'systèmes de signalements et de réclamations',
+        // 'Faculty Digital Archive' (NYU Libraries) -- confirmed twice now
+        // (2026-08-17: "Violoncello : Faculty Digital Archive"; 2026-08-18:
+        // "IFA Research Resources : Faculty Digital Archive : NYU
+        // Libraries") to be a resource-listing page, not an article, with
+        // the archive's own name appended to whatever the listing's
+        // subject happens to be -- no amount of taxonomy expansion will
+        // ever turn a listing page into classifiable article content.
+        'faculty digital archive',
     ];
     foreach ($junkPatterns as $pattern) {
         if (str_contains($normalized, $pattern)) return true;
@@ -1731,6 +1752,11 @@ function looks_like_site_branding(string $title, string $host): bool {
     $genericHubTitles = [
         'home', 'homepage', 'welcome', 'journal home', 'main page', 'landing page', 'index',
         'events', 'news', 'about us', 'contact us', 'credits',
+        // French equivalents -- confirmed on production (2026-08-18) via
+        // OpenEdition-hosted blogs, same site-footer-page pattern as the
+        // English entries above, just short enough (<=3 words) to land
+        // here instead of is_junk_title()'s substring list.
+        'crédits', 'cgu', 'à propos', 'contactez-nous', 'nous contacter',
     ];
     if (in_array($normalized, $genericHubTitles, true)) return true;
 
