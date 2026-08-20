@@ -69,7 +69,7 @@
 return [
     // Mathematics & Physical Sciences
     'mathematics' => ['label' => 'Mathematics', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['mathematics', 'topology', 'combinatorics', 'algebra', 'algebraic', 'number theory', 'differential equations', 'geometry', 'geometric', 'calculus', 'mathematical proof', 'theorem', 'fr:mathematiques', 'es:matematicas', 'de:mathematik']],
-    'physics' => ['label' => 'Physics', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['physics', 'quantum', 'particle physics', 'astrophysics', 'cosmology', 'relativity', 'condensed matter', 'thermodynamics', 'electromagnetism', 'gravitational wave', 'string theory', 'fr:physique', 'es:fisica', 'de:physik', 'ru:физика']],
+    'physics' => ['label' => 'Physics', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['physics', 'quantum', 'particle physics', 'astrophysics', 'cosmology', 'relativity', 'condensed matter', 'thermodynamics', 'electromagnetism', 'gravitational wave', 'string theory', 'higgs boson', 'fr:physique', 'es:fisica', 'de:physik', 'ru:физика']],
     'chemistry' => ['label' => 'Chemistry', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['chemistry', 'catalysis', 'organic synthesis', 'chemical reaction', 'chemical compound', 'spectroscopy', 'molecular structure', 'fr:chimie', 'es:quimica', 'de:chemie']],
     'astronomy' => ['label' => 'Astronomy & Space', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['astronomy', 'exoplanet', 'galaxy', 'telescope', 'space mission', 'black hole', 'solar system', 'astrophysics', 'fr:astronomie', 'es:astronomia']],
     'earth-science' => ['label' => 'Earth Science', 'parent' => 'Mathematics & Physical Sciences', 'keywords' => ['geology', 'seismology', 'volcanology', 'geophysics', 'earth science', 'tectonic', 'mineralogy', 'fr:geologie', 'es:geologia']],
@@ -84,12 +84,21 @@ return [
     'computer-science' => ['label' => 'Computer Science', 'parent' => 'Computing & Engineering', 'keywords' => ['algorithm', 'computer science', 'distributed systems', 'programming languages', 'cryptography', 'databases', 'software engineering', 'operating systems', 'compiler design', 'software development', 'fr:informatique']],
     'robotics' => ['label' => 'Robotics', 'parent' => 'Computing & Engineering', 'keywords' => ['robotics', 'autonomous vehicle', 'robot manipulation', 'drone', 'autonomous system']],
     'engineering' => ['label' => 'Engineering', 'parent' => 'Computing & Engineering', 'keywords' => ['mechanical engineering', 'civil engineering', 'aerospace engineering', 'structural engineering', 'engineering design', 'fr:ingenierie', 'es:ingenieria']],
-    'materials-science' => ['label' => 'Materials Science', 'parent' => 'Computing & Engineering', 'keywords' => ['materials science', 'nanomaterial', 'polymer', 'semiconductor', 'alloy', 'nanotechnology', 'thin film', 'crystal structure']],
+    // 'polymersome'/'copolymer' added after confirming on production
+    // (2026-08-20) that the existing bare 'polymer' keyword's strict
+    // word-boundary matching (\bpolymer\b) does NOT match either word --
+    // "copolymers" has a word character immediately before "polymer", and
+    // "polymersomes" has one immediately after, so neither ever satisfies
+    // a word boundary on the side where 'polymer' actually sits. A real,
+    // substantial (876-char) abstract about diblock-copolymer polymersome
+    // membranes was sitting in General for exactly this reason -- not a
+    // missing-text or fetch problem, a genuine narrow keyword-list gap.
+    'materials-science' => ['label' => 'Materials Science', 'parent' => 'Computing & Engineering', 'keywords' => ['materials science', 'nanomaterial', 'polymer', 'polymersome', 'copolymer', 'semiconductor', 'alloy', 'nanotechnology', 'thin film', 'crystal structure']],
     'cybersecurity' => ['label' => 'Cybersecurity', 'parent' => 'Computing & Engineering', 'keywords' => ['cybersecurity', 'network security', 'malware analysis', 'penetration testing', 'data privacy', 'encryption']],
     'data-science' => ['label' => 'Data Science', 'parent' => 'Computing & Engineering', 'keywords' => ['data science', 'data mining', 'predictive modeling', 'big data']],
     'human-computer-interaction' => ['label' => 'Human-Computer Interaction', 'parent' => 'Computing & Engineering', 'keywords' => ['human-computer interaction', 'user experience design', 'usability study', 'user interface design']],
     'electrical-engineering' => ['label' => 'Electrical Engineering', 'parent' => 'Computing & Engineering', 'keywords' => ['electrical engineering', 'circuit design', 'power systems engineering', 'signal processing']],
-    'chemical-engineering' => ['label' => 'Chemical Engineering', 'parent' => 'Computing & Engineering', 'keywords' => ['chemical engineering', 'process engineering', 'reaction engineering']],
+    'chemical-engineering' => ['label' => 'Chemical Engineering', 'parent' => 'Computing & Engineering', 'keywords' => ['chemical engineering', 'process engineering', 'reaction engineering', 'electrochemical']],
     'biomedical-engineering' => ['label' => 'Biomedical Engineering', 'parent' => 'Computing & Engineering', 'keywords' => ['biomedical engineering', 'medical device design', 'tissue engineering']],
     'telecommunications' => ['label' => 'Telecommunications', 'parent' => 'Computing & Engineering', 'keywords' => ['telecommunications', 'wireless communication', '5g network', 'telecommunication network']],
 
@@ -99,7 +108,7 @@ return [
     'neuroscience' => ['label' => 'Neuroscience', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['neuroscience', 'brain', 'cognitive', 'neuron', 'neural circuit', 'neuroimaging', 'fr:neurologie']],
     'genetics' => ['label' => 'Genetics & Genomics', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['genetics', 'genomics', 'crispr', 'gene therapy', 'genetic variation', 'dna sequencing']],
     'ecology' => ['label' => 'Ecology & Environment', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['ecology', 'biodiversity', 'ecosystem', 'conservation', 'species', 'habitat', 'fr:ecologie', 'es:ecologia']],
-    'pharmacology' => ['label' => 'Pharmacology', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['pharmacology', 'drug development', 'pharmacokinetics', 'pharmaceutical']],
+    'pharmacology' => ['label' => 'Pharmacology', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['pharmacology', 'pharmacological', 'drug development', 'pharmacokinetics', 'pharmaceutical']],
     'immunology' => ['label' => 'Immunology', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['immunology', 'immune response', 'vaccine development', 'autoimmune disease']],
     'toxicology' => ['label' => 'Toxicology', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['toxicology', 'toxicity assessment']],
     'zoology' => ['label' => 'Zoology', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['zoology', 'animal behavior', 'wildlife biology']],
@@ -124,7 +133,7 @@ return [
     'finance' => ['label' => 'Finance', 'parent' => 'Social Sciences', 'keywords' => ['finance', 'asset pricing', 'financial market', 'investment strategy', 'risk management', 'corporate finance']],
     'psychology' => ['label' => 'Psychology', 'parent' => 'Social Sciences', 'keywords' => ['psychology', 'behavioral science', 'mental health', 'cognitive behavior', 'psychological wellbeing', 'fr:psychologie', 'es:psicologia']],
     'sociology' => ['label' => 'Sociology', 'parent' => 'Social Sciences', 'keywords' => ['sociology', 'sociological', 'social inequality', 'social network analysis', 'demography', 'social structure', 'social movement', 'fr:sociologie', 'fr:sociologique', 'es:sociologia', 'ru:социология']],
-    'political-science' => ['label' => 'Political Science', 'parent' => 'Social Sciences', 'keywords' => ['political science', 'governance', 'public policy', 'international relations', 'political theory', 'fr:science politique', 'es:ciencia politica']],
+    'political-science' => ['label' => 'Political Science', 'parent' => 'Social Sciences', 'keywords' => ['political science', 'governance', 'public policy', 'international relations', 'political theory', 'political economy', 'labor policy', 'fr:science politique', 'es:ciencia politica']],
     'anthropology' => ['label' => 'Anthropology', 'parent' => 'Social Sciences', 'keywords' => ['anthropology', 'ethnography', 'cultural studies', 'fr:anthropologie']],
     'urban-planning' => ['label' => 'Urban Planning', 'parent' => 'Social Sciences', 'keywords' => ['urban planning', 'city planning', 'transportation planning', 'housing policy']],
     'criminology' => ['label' => 'Criminology', 'parent' => 'Social Sciences', 'keywords' => ['criminology', 'crime prevention', 'criminal justice']],

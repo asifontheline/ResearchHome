@@ -983,7 +983,7 @@ function arxiv_category_label(string $code): string {
  * trigger another resync by bumping SUBJECT_KEYWORDS_VERSION, the same
  * self-migrating shape as every other ensure_*() function in this file.
  */
-const SUBJECT_KEYWORDS_VERSION = '4';
+const SUBJECT_KEYWORDS_VERSION = '5';
 
 /**
  * Version 3 correction: bare generic adjectives added in version 2 (aiming
@@ -1224,7 +1224,21 @@ function classify_subjects(string $text, ?string $lang = null, bool $debug = fal
             // words/phrases (this is how a gut-microbiota/anemia review got
             // tagged "Law": "regulation" as a bare substring keyword matched
             // "iron regulation" in the abstract).
-            $result = preg_match('/\b' . preg_quote($kw, '/') . '\b/u', $text);
+            //
+            // Spaces in a multi-word keyword match either a literal space OR
+            // a hyphen -- confirmed on production (2026-08-20): a real,
+            // substantial abstract about "Gravitational-Wave Signals" sat in
+            // General because the 'gravitational wave' keyword only matched
+            // the space-separated form, not the equally common hyphenated
+            // adjectival form ("gravitational-wave signals" vs "detecting
+            // gravitational waves"). Scientific/technical compound terms are
+            // routinely written both ways interchangeably (climate-change
+            // vs. climate change, machine-learning vs. machine learning),
+            // so this is a systemic gap affecting every multi-word keyword
+            // in the taxonomy, not a one-off. Single-word keywords are
+            // untouched by this (no space to replace).
+            $pattern = preg_replace('/ /', '[\\s-]+', preg_quote($kw, '/'));
+            $result = preg_match('/\b' . $pattern . '\b/u', $text);
             if ($result === false && $firstPcreError === null) {
                 // preg_last_error_msg() needs PHP 8.0+ -- fall back to the
                 // numeric code (preg_last_error()) on anything older rather
@@ -1744,6 +1758,18 @@ function is_junk_title(string $title): bool {
         // "site's-own-page, not an article" pattern as 'funding and
         // tenders' above -- confirmed on production (2026-08-18).
         'donors to the conversation',
+        // Confirmed on production (2026-08-20), sampling the current
+        // General backlog: more site's-own-page patterns, same class as
+        // the ones above, each from a different platform --
+        // 'your most reliable trusted news' (theconversation.com's own
+        // tagline, appearing as a title on some crawled variant of its
+        // homepage); 'policy for accessibility' (a university library's
+        // ADA/accessibility policy page, not an article); 's'abonner aux
+        // fils rss' (OpenEdition's own "subscribe to this portal's RSS
+        // feeds" utility page); 'ccdc support' (a database vendor's
+        // download-instructions support page, not a research article).
+        'your most reliable trusted news', 'policy for accessibility',
+        's\'abonner aux fils rss', 'ccdc support',
     ];
     foreach ($junkPatterns as $pattern) {
         if (str_contains($normalized, $pattern)) return true;
@@ -1795,6 +1821,11 @@ function looks_like_site_branding(string $title, string $host): bool {
         // English entries above, just short enough (<=3 words) to land
         // here instead of is_junk_title()'s substring list.
         'crédits', 'cgu', 'à propos', 'contactez-nous', 'nous contacter',
+        // 'publications' -- confirmed on production (2026-08-20): a bare
+        // "PUBLICATIONS" title whose "abstract" was just a list of the
+        // page owner's own papers, i.e. a listing page, same "site's own
+        // section header" pattern as 'events'/'news' above.
+        'publications',
     ];
     if (in_array($normalized, $genericHubTitles, true)) return true;
 
@@ -1943,6 +1974,21 @@ function extract_body_text(string $html, int $maxChars = 4000): string {
  * with the same raw-text fallback as before when it doesn't.
  */
 function enrich_from_fetched_body(string $body, string $url): array {
+    // A meaningful share of items link directly to a PDF (arXiv, Semantic
+    // Scholar's openAccessPdf, patent filings) rather than an HTML landing
+    // page -- confirmed on production (2026-08-20): running the HTML meta-
+    // tag/body-text extractors below against raw PDF bytes (binary, often
+    // Flate-compressed) doesn't fail, it just silently returns compressed
+    // binary noise as if it were real text, which then gets fed straight
+    // into classify_subjects() as if it were content. No PDF-to-text tool
+    // is available on this host (checked: no pdftotext binary, no PHP PDF
+    // extension) to do this properly, so failing cleanly -- an empty
+    // synopsis, same as "couldn't fetch anything useful" -- is safer than
+    // silently passing binary garbage through as if it were text.
+    if (str_starts_with($body, '%PDF-')) {
+        return ['synopsis' => '', 'language' => null];
+    }
+
     $meta = extract_generic_metadata($body, $url);
     $synopsis = trim((string) ($meta['abstract'] ?? ''));
     if ($synopsis === '') {
