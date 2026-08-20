@@ -1,6 +1,15 @@
 <?php
 require_once __DIR__ . '/db.php';
 
+// Optional: only extract_pdf_text() (via smalot/pdfparser) needs this --
+// guarded with file_exists so a fresh clone that hasn't run
+// `composer install` yet still runs fine, just without PDF text
+// extraction (extract_pdf_text() itself degrades to '' when the class
+// isn't loaded, same as any other fetch that came up empty).
+if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
+    require_once __DIR__ . '/../vendor/autoload.php';
+}
+
 /**
  * Per-IP request throttle — runs before any page does its own (potentially
  * expensive) queries, since functions.php is the first require in every
@@ -1973,20 +1982,45 @@ function extract_body_text(string $html, int $maxChars = 4000): string {
  * meaningfully better input for classify_subjects() when a page has one,
  * with the same raw-text fallback as before when it doesn't.
  */
+/**
+ * A meaningful share of items link directly to a PDF (arXiv, Semantic
+ * Scholar's openAccessPdf, patent filings) rather than an HTML landing
+ * page. Confirmed on production (2026-08-20): running the HTML meta-tag/
+ * body-text extractors on raw PDF bytes (binary, often Flate-compressed)
+ * doesn't fail, it just silently returns compressed binary noise as if it
+ * were real text. Uses smalot/pdfparser (pure-PHP, no external binary --
+ * this host has no pdftotext and no PHP PDF extension, checked) via
+ * Composer; see composer.json. Deliberately capped and defensive: some
+ * PDFs are hundreds of pages, and malformed/encrypted/scanned-image PDFs
+ * are common enough in the wild that a parse failure needs to degrade to
+ * "no text found," not crash the whole validator sweep.
+ */
+function extract_pdf_text(string $pdfBytes, int $maxChars = 20000): string {
+    if (!class_exists(\Smalot\PdfParser\Parser::class)) {
+        return ''; // vendor/ not installed (e.g. `composer install` never run) -- degrade quietly
+    }
+    // Guards against pathological inputs (a multi-hundred-page PDF) eating
+    // the validator's time budget on a single item -- smalot/pdfparser has
+    // no built-in size/page cap of its own.
+    if (strlen($pdfBytes) > 15 * 1024 * 1024) {
+        return '';
+    }
+    try {
+        $parser = new \Smalot\PdfParser\Parser();
+        $pdf = $parser->parseContent($pdfBytes);
+        $text = trim(preg_replace('/\s+/u', ' ', $pdf->getText()) ?? '');
+        return mb_substr($text, 0, $maxChars);
+    } catch (\Throwable $e) {
+        // Malformed, encrypted, or scanned-image-only (no text layer) PDFs
+        // all throw here -- same "found nothing usable" outcome as a fetch
+        // failure, not a validator-crashing error.
+        return '';
+    }
+}
+
 function enrich_from_fetched_body(string $body, string $url): array {
-    // A meaningful share of items link directly to a PDF (arXiv, Semantic
-    // Scholar's openAccessPdf, patent filings) rather than an HTML landing
-    // page -- confirmed on production (2026-08-20): running the HTML meta-
-    // tag/body-text extractors below against raw PDF bytes (binary, often
-    // Flate-compressed) doesn't fail, it just silently returns compressed
-    // binary noise as if it were real text, which then gets fed straight
-    // into classify_subjects() as if it were content. No PDF-to-text tool
-    // is available on this host (checked: no pdftotext binary, no PHP PDF
-    // extension) to do this properly, so failing cleanly -- an empty
-    // synopsis, same as "couldn't fetch anything useful" -- is safer than
-    // silently passing binary garbage through as if it were text.
     if (str_starts_with($body, '%PDF-')) {
-        return ['synopsis' => '', 'language' => null];
+        return ['synopsis' => extract_pdf_text($body), 'language' => null];
     }
 
     $meta = extract_generic_metadata($body, $url);

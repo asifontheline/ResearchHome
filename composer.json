@@ -1,0 +1,12 @@
+{
+    "name": "asifontheline/researchhome",
+    "description": "ResHub -- self-updating research catalog",
+    "type": "project",
+    "require": {
+        "php": ">=8.0",
+        "smalot/pdfparser": "^2.12"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

@@ -3,3 +3,10 @@
 /backups/*.sql
 /logs/*.log
 /.claude/
+
+# Composer deps (currently: smalot/pdfparser for extract_pdf_text()) --
+# composer.json/composer.lock ARE tracked for reproducibility, but vendor/
+# itself isn't; run `composer install` after cloning/deploying. On
+# production this is installed once via SSH (see README) and, like logs/,
+# persists across FTP deploys since those never delete untracked files.
+/vendor/

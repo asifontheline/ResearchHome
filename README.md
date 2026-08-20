@@ -208,6 +208,7 @@ rm ~/Library/LaunchAgents/com.researchhome.{harvest,discover}.plist
 
 ```
 config.php            DB credentials + app secret (edit this)
+composer.json/.lock    One dependency (smalot/pdfparser) -- run `composer install` after cloning/deploying (see step 4b)
 sql/schema.sql         Run this once in phpMyAdmin to create tables
 setup.php              One-time web page to create your admin login (delete after use)
 create_admin.php       CLI alternative to setup.php, if you have SSH/terminal
@@ -294,6 +295,16 @@ GitHub Actions workflow, **Deploy via FTP**:
 
 4. **Edit `config.php`** in place (File Manager → Edit) with the DB name,
    user, password from step 1, and set `APP_SECRET` to a long random string.
+
+4b. **Install the one Composer dependency (requires SSH).** `composer.json`/
+    `composer.lock` are tracked in git and deploy with everything else, but
+    `vendor/` itself isn't (same reasoning as `logs/` — it's meant to
+    persist on the server, not round-trip through FTP deploys). From the
+    app directory: `composer install --no-dev`. This is only used by
+    `extract_pdf_text()` (validator rescue-classification for items whose
+    only link is a PDF, e.g. arXiv/Semantic Scholar) — the app runs fine
+    without it, just without that one capability, so this step can be
+    skipped if SSH/Composer aren't available and revisited later.
 
 5. **Create your admin login.**
    Visit `https://yourdomain/setup.php` in a browser, fill in a username and
