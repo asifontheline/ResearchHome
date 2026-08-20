@@ -992,7 +992,7 @@ function arxiv_category_label(string $code): string {
  * trigger another resync by bumping SUBJECT_KEYWORDS_VERSION, the same
  * self-migrating shape as every other ensure_*() function in this file.
  */
-const SUBJECT_KEYWORDS_VERSION = '5';
+const SUBJECT_KEYWORDS_VERSION = '6';
 
 /**
  * Version 3 correction: bare generic adjectives added in version 2 (aiming
@@ -1028,7 +1028,10 @@ const KEYWORD_REMOVALS = [
     'artificial-intelligence' => ['intelligence artificielle', 'inteligencia artificial', 'kunstliche intelligenz'],
     'computer-science' => ['informatique'],
     'engineering' => ['ingenierie', 'ingenieria'],
-    'medicine' => ['medecine', 'medicina', 'medizin', 'медицина', 'здоровье'],
+    // 'treatment' (2026-08-20): mistagging clearly non-medical STEM
+    // content ("wastewater treatment", "surface treatment", "heat
+    // treatment") as Medicine, confirmed on production.
+    'medicine' => ['medecine', 'medicina', 'medizin', 'медицина', 'здоровье', 'treatment'],
     'neuroscience' => ['neurologie'],
     'ecology' => ['ecologie', 'ecologia'],
     'climate-science' => ['changement climatique', 'cambio climatico'],
@@ -1040,7 +1043,10 @@ const KEYWORD_REMOVALS = [
     'law' => ['droit international', 'derecho'],
     'education' => ['educacion'],
     'linguistics' => ['linguistique'],
-    'literature' => ['litterature', 'literatura'],
+    // 'novel' (2026-08-20): mistagging Literature at serious scale (322
+    // items on production) via the extremely common science-writing
+    // adjective sense ("a novel approach"), unrelated to novel-the-book.
+    'literature' => ['litterature', 'literatura', 'novel'],
     'visual-arts' => ['beaux-arts', 'bellas artes'],
     'musicology' => ['musique', 'musica'],
 ];

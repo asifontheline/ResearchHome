@@ -104,7 +104,14 @@ return [
 
     // Life Sciences & Medicine
     'biology' => ['label' => 'Biology', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['biology', 'gene', 'genome', 'cell biology', 'protein', 'evolutionary biology', 'microbiology', 'molecular biology', 'organism', 'fr:biologie', 'es:biologia']],
-    'medicine' => ['label' => 'Medicine & Health', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['medicine', 'clinical trial', 'disease', 'treatment', 'diagnosis', 'public health', 'epidemiology', 'patient outcome', 'healthcare', 'medical research', 'fr:medecine', 'es:medicina', 'de:medizin', 'ru:медицина', 'ru:здоровье']],
+    // 'treatment' (bare) removed after confirming on production
+    // (2026-08-20) it was mistagging clearly non-medical STEM papers as
+    // Medicine -- "wastewater treatment", "surface treatment", "heat
+    // treatment", "data treatment" are all common phrasing across
+    // materials science, chemistry, environmental engineering, and
+    // finance, none of them medical. Same bare-word false-positive class
+    // as 'novel'/Literature above.
+    'medicine' => ['label' => 'Medicine & Health', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['medicine', 'clinical trial', 'disease', 'diagnosis', 'public health', 'epidemiology', 'patient outcome', 'healthcare', 'medical research', 'fr:medecine', 'es:medicina', 'de:medizin', 'ru:медицина', 'ru:здоровье']],
     'neuroscience' => ['label' => 'Neuroscience', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['neuroscience', 'brain', 'cognitive', 'neuron', 'neural circuit', 'neuroimaging', 'fr:neurologie']],
     'genetics' => ['label' => 'Genetics & Genomics', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['genetics', 'genomics', 'crispr', 'gene therapy', 'genetic variation', 'dna sequencing']],
     'ecology' => ['label' => 'Ecology & Environment', 'parent' => 'Life Sciences & Medicine', 'keywords' => ['ecology', 'biodiversity', 'ecosystem', 'conservation', 'species', 'habitat', 'fr:ecologie', 'es:ecologia']],
@@ -164,7 +171,15 @@ return [
     // disciplines' writing, not specific to the Philosophy subject.
     'philosophy' => ['label' => 'Philosophy', 'parent' => 'Humanities & Law', 'keywords' => ['philosophy', 'ethics', 'epistemology', 'metaphysics', 'fr:philosophie', 'es:filosofia']],
     'religious-studies' => ['label' => 'Religious Studies', 'parent' => 'Humanities & Law', 'keywords' => ['religious studies', 'theology', 'comparative religion']],
-    'literature' => ['label' => 'Literature', 'parent' => 'Humanities & Law', 'keywords' => ['literary criticism', 'literary theory', 'comparative literature', 'literary analysis', 'poetry', 'novel', 'fr:litterature', 'es:literatura']],
+    // 'novel' (bare noun) removed after confirming on production
+    // (2026-08-20) it was mistagging Literature at serious scale (322
+    // items) -- the adjective "novel" ("a novel approach", "novel
+    // therapeutic strategy") is one of the single most common words in
+    // all of scientific writing, completely unrelated to a novel-the-book,
+    // and word-boundary matching can't distinguish the two senses. Same
+    // class of mistake as the original bare "law"/"regulation" bug this
+    // file's own top comment warns about.
+    'literature' => ['label' => 'Literature', 'parent' => 'Humanities & Law', 'keywords' => ['literary criticism', 'literary theory', 'comparative literature', 'literary analysis', 'poetry', 'fr:litterature', 'es:literatura']],
     'classics' => ['label' => 'Classics', 'parent' => 'Humanities & Law', 'keywords' => ['classical studies', 'ancient greek literature', 'latin literature']],
     'library-science' => ['label' => 'Library & Information Science', 'parent' => 'Humanities & Law', 'keywords' => ['library science', 'information science', 'archival studies']],
     'journalism' => ['label' => 'Journalism & Media', 'parent' => 'Humanities & Law', 'keywords' => ['journalism', 'media studies', 'broadcast journalism', 'news media']],
