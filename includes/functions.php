@@ -1996,68 +1996,60 @@ function extract_body_text(string $html, int $maxChars = 4000): string {
  * doesn't fail, it just silently returns compressed binary noise as if it
  * were real text. Uses smalot/pdfparser (pure-PHP, no external binary --
  * this host has no pdftotext and no PHP PDF extension, checked) via
- * Composer; see composer.json. Deliberately capped and defensive: some
- * PDFs are hundreds of pages, and malformed/encrypted/scanned-image PDFs
- * are common enough in the wild that a parse failure needs to degrade to
- * "no text found," not crash the whole validator sweep.
+ * Composer; see composer.json.
  *
- * Hard pcntl_alarm() interrupt around the actual parse call -- confirmed
- * on production (2026-08-21 through 2026-08-24, found during a routine
- * hourly check): adding this function turned nearly every validator run
- * into a silent host-level kill (770 of 864 runs over 3 days never
- * reached a clean finish). CLI's own max_execution_time is unlimited on
- * this host (checked) and memory_limit is a generous 512M, so PHP's own
- * limits weren't stopping it -- this is the exact same "the host kills
- * long-running processes at the OS level, outside PHP's own limits"
- * behavior validator_daemon.php was built around and eventually retired
- * over (see README/DESIGN.md) now hitting the cron-based validator
- * whenever one slow/complex PDF parse pushes a run long enough. The
- * daemon's fix for this was a hard SIGALRM interrupt around each
- * sub-task; reintroducing that narrowly here (just this one call, not
- * the whole daemon architecture) is the same proven fix applied to the
- * actual new risk, not a reason to resurrect the daemon.
+ * Runs the actual parse in an isolated CHILD PROCESS
+ * (bin/pdf_extract_worker.php), not in-process -- two things were tried
+ * and failed here first, both confirmed on production (2026-08-21 through
+ * 2026-08-24, a 3-day incident found during a routine hourly check: 770
+ * of 864 validator runs failed to complete):
+ *   1. A bare in-process parseContent() call: some PDFs make
+ *      smalot/pdfparser hit PHP's "Allowed memory size exhausted" fatal
+ *      error (confirmed example: a single embedded-font allocation of
+ *      320MB against this host's 512M limit, inside the library's own
+ *      Font.php). That error class is NOT a catchable Throwable in PHP --
+ *      try/catch around the call does nothing -- and terminates the
+ *      whole process immediately.
+ *   2. Wrapping the call in a pcntl_alarm() hard timeout: doesn't help
+ *      either, since a memory-exhaustion fatal error isn't a hang for a
+ *      signal to interrupt -- it kills the process synchronously the
+ *      moment the allocation is attempted, before any alarm could fire.
+ * A crash inside a THIRD-PARTY library that neither try/catch nor a
+ * signal can stop only leaves one real option: don't let it run in the
+ * process that matters. The worker gets its own 256M memory_limit and
+ * runs under `timeout` for a wall-clock cap too -- if it OOMs or hangs,
+ * only it dies, and this function just sees a failed/empty child
+ * invocation, indistinguishable from any other "couldn't extract
+ * anything" case.
  */
 function extract_pdf_text(string $pdfBytes, int $maxChars = 20000): string {
-    if (!class_exists(\Smalot\PdfParser\Parser::class)) {
-        return ''; // vendor/ not installed (e.g. `composer install` never run) -- degrade quietly
-    }
     // Guards against pathological inputs (a multi-hundred-page PDF) eating
-    // the validator's time budget on a single item -- smalot/pdfparser has
-    // no built-in size/page cap of its own. Lowered from an initial 15MB
-    // after the timeout issue above -- most real academic PDFs are a few
-    // MB; a large one is also disproportionately likely to be slow/complex
-    // to parse, not just slow to download.
+    // real time/memory even in the isolated worker -- most real academic
+    // PDFs are a few MB; a large one is also disproportionately likely to
+    // be slow/complex to parse, not just slow to download.
     if (strlen($pdfBytes) > 8 * 1024 * 1024) {
         return '';
     }
+    $workerPath = __DIR__ . '/../bin/pdf_extract_worker.php';
+    if (!is_file($workerPath)) {
+        return ''; // shouldn't happen in a normal deploy, but degrade quietly rather than warn on every call
+    }
 
-    $hasPcntl = function_exists('pcntl_alarm') && function_exists('pcntl_signal');
-    if ($hasPcntl) {
-        pcntl_async_signals(true);
-        pcntl_signal(SIGALRM, function () {
-            throw new \RuntimeException('extract_pdf_text() exceeded its hard time limit');
-        });
-        pcntl_alarm(10); // seconds -- generous for a single PDF parse, tight enough to never itself be why a run overruns
+    $tmpPath = tempnam(sys_get_temp_dir(), 'reshub_pdf_');
+    if ($tmpPath === false) {
+        return '';
     }
     try {
-        $parser = new \Smalot\PdfParser\Parser();
-        $pdf = $parser->parseContent($pdfBytes);
-        $text = trim(preg_replace('/\s+/u', ' ', $pdf->getText()) ?? '');
-        return mb_substr($text, 0, $maxChars);
-    } catch (\Throwable $e) {
-        // Malformed, encrypted, scanned-image-only (no text layer), or
-        // the SIGALRM timeout above all throw here -- same "found nothing
-        // usable" outcome as a fetch failure, not a validator-crashing
-        // error.
-        return '';
+        file_put_contents($tmpPath, $pdfBytes);
+        // `timeout` (GNU coreutils, confirmed present) is the wall-clock
+        // backstop; the worker's own ini_set('memory_limit', ...) is the
+        // memory backstop. escapeshellarg() on both paths -- $tmpPath is
+        // ours, but defense in depth costs nothing here.
+        $cmd = 'timeout 15 php ' . escapeshellarg($workerPath) . ' ' . escapeshellarg($tmpPath) . ' 2>/dev/null';
+        $output = @shell_exec($cmd);
+        return $output ? mb_substr(trim($output), 0, $maxChars) : '';
     } finally {
-        // Disarm regardless of outcome -- a left-armed alarm would fire
-        // later against whatever unrelated code happens to be running
-        // when the 10s elapses, which is its own kind of hard-to-debug
-        // crash.
-        if ($hasPcntl) {
-            pcntl_alarm(0);
-        }
+        @unlink($tmpPath);
     }
 }
 
