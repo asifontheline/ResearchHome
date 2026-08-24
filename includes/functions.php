@@ -1899,7 +1899,15 @@ function is_non_article_host(string $host): bool {
 function is_listing_page_url(string $url): bool {
     $path = parse_url($url, PHP_URL_PATH) ?? '';
     return (bool) preg_match(
-        '#/(date/\d{4}(/\d{1,2})?|category/[^/]+|tag/[^/]+|author/[^/]+|type/[^/]+|page/\d+|comments/feed|feed)/?$#i',
+        // 'date/YYYY(/MM(/DD)?)?' -- widened from YYYY(/MM)? after
+        // confirming on production (2026-08-24) a day-level WordPress
+        // archive (/date/2026/08/09) slipped through the original
+        // 2-segment-max pattern. 'browse/...' -- confirmed the same day:
+        // nrc-publications.canada.ca's /eng/browse/authors/ is the
+        // identical "listing page, not an article" pattern as
+        // /author/foo, just a different platform's URL convention
+        // (common on DSpace/EPrints-style institutional repositories).
+        '#/(date/\d{4}(/\d{1,2}){0,2}|category/[^/]+|tag/[^/]+|author/[^/]+|browse/[^/]+|type/[^/]+|page/\d+|comments/feed|feed)/?$#i',
         rtrim($path, '/') . '/'
     );
 }
