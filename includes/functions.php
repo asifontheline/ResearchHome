@@ -2000,6 +2000,22 @@ function extract_body_text(string $html, int $maxChars = 4000): string {
  * PDFs are hundreds of pages, and malformed/encrypted/scanned-image PDFs
  * are common enough in the wild that a parse failure needs to degrade to
  * "no text found," not crash the whole validator sweep.
+ *
+ * Hard pcntl_alarm() interrupt around the actual parse call -- confirmed
+ * on production (2026-08-21 through 2026-08-24, found during a routine
+ * hourly check): adding this function turned nearly every validator run
+ * into a silent host-level kill (770 of 864 runs over 3 days never
+ * reached a clean finish). CLI's own max_execution_time is unlimited on
+ * this host (checked) and memory_limit is a generous 512M, so PHP's own
+ * limits weren't stopping it -- this is the exact same "the host kills
+ * long-running processes at the OS level, outside PHP's own limits"
+ * behavior validator_daemon.php was built around and eventually retired
+ * over (see README/DESIGN.md) now hitting the cron-based validator
+ * whenever one slow/complex PDF parse pushes a run long enough. The
+ * daemon's fix for this was a hard SIGALRM interrupt around each
+ * sub-task; reintroducing that narrowly here (just this one call, not
+ * the whole daemon architecture) is the same proven fix applied to the
+ * actual new risk, not a reason to resurrect the daemon.
  */
 function extract_pdf_text(string $pdfBytes, int $maxChars = 20000): string {
     if (!class_exists(\Smalot\PdfParser\Parser::class)) {
@@ -2007,9 +2023,21 @@ function extract_pdf_text(string $pdfBytes, int $maxChars = 20000): string {
     }
     // Guards against pathological inputs (a multi-hundred-page PDF) eating
     // the validator's time budget on a single item -- smalot/pdfparser has
-    // no built-in size/page cap of its own.
-    if (strlen($pdfBytes) > 15 * 1024 * 1024) {
+    // no built-in size/page cap of its own. Lowered from an initial 15MB
+    // after the timeout issue above -- most real academic PDFs are a few
+    // MB; a large one is also disproportionately likely to be slow/complex
+    // to parse, not just slow to download.
+    if (strlen($pdfBytes) > 8 * 1024 * 1024) {
         return '';
+    }
+
+    $hasPcntl = function_exists('pcntl_alarm') && function_exists('pcntl_signal');
+    if ($hasPcntl) {
+        pcntl_async_signals(true);
+        pcntl_signal(SIGALRM, function () {
+            throw new \RuntimeException('extract_pdf_text() exceeded its hard time limit');
+        });
+        pcntl_alarm(10); // seconds -- generous for a single PDF parse, tight enough to never itself be why a run overruns
     }
     try {
         $parser = new \Smalot\PdfParser\Parser();
@@ -2017,10 +2045,19 @@ function extract_pdf_text(string $pdfBytes, int $maxChars = 20000): string {
         $text = trim(preg_replace('/\s+/u', ' ', $pdf->getText()) ?? '');
         return mb_substr($text, 0, $maxChars);
     } catch (\Throwable $e) {
-        // Malformed, encrypted, or scanned-image-only (no text layer) PDFs
-        // all throw here -- same "found nothing usable" outcome as a fetch
-        // failure, not a validator-crashing error.
+        // Malformed, encrypted, scanned-image-only (no text layer), or
+        // the SIGALRM timeout above all throw here -- same "found nothing
+        // usable" outcome as a fetch failure, not a validator-crashing
+        // error.
         return '';
+    } finally {
+        // Disarm regardless of outcome -- a left-armed alarm would fire
+        // later against whatever unrelated code happens to be running
+        // when the 10s elapses, which is its own kind of hard-to-debug
+        // crash.
+        if ($hasPcntl) {
+            pcntl_alarm(0);
+        }
     }
 }
 
