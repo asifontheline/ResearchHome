@@ -1785,6 +1785,15 @@ function is_junk_title(string $title): bool {
         // download-instructions support page, not a research article).
         'your most reliable trusted news', 'policy for accessibility',
         's\'abonner aux fils rss', 'ccdc support',
+        // Confirmed on production (2026-08-27), sampling the General
+        // backlog again: 'reserve workstations' catches a library
+        // facility-booking utility page ("Bookings | Reserve
+        // workstations, study spaces and more"); 'presse et revues'
+        // (French: "press and reviews") catches a digital library's
+        // section-listing page (Gallica's own), same class as
+        // 'presse & mag'/'news and media' above but too long for the
+        // short-title generic-hub-titles list.
+        'reserve workstations', 'presse et revues',
     ];
     foreach ($junkPatterns as $pattern) {
         if (str_contains($normalized, $pattern)) return true;
@@ -1841,6 +1850,11 @@ function looks_like_site_branding(string $title, string $host): bool {
         // page owner's own papers, i.e. a listing page, same "site's own
         // section header" pattern as 'events'/'news' above.
         'publications',
+        // 'presse & mag', 'news and media' -- confirmed on production
+        // (2026-08-27) sampling the General backlog: same "site's own
+        // section header, not an article" pattern as 'news'/'events'
+        // above, just a couple words longer.
+        'presse & mag', 'news and media',
     ];
     if (in_array($normalized, $genericHubTitles, true)) return true;
 
