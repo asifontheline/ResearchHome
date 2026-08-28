@@ -1484,12 +1484,29 @@ function check_links_batch(int $limit = 8, ?float $deadline = null): array {
 }
 
 /**
- * Full-sweep tag maintenance: junk-pruning, tag reconciliation, zero-tag
- * rescue, and General-upgrade, all in one per-item pass over the *entire*
- * catalog in id order -- the single replacement for what used to be three
- * separate functions (retag_backlog_batch(), classify_zero_tag_backlog(),
- * reclassify_general_backlog()), which independently re-fetched and
- * re-classified overlapping sets of items on three different schedules.
+ * Full-sweep tag maintenance: junk-pruning, additive reclassification,
+ * zero-tag rescue, and General-upgrade, all in one per-item pass over the
+ * *entire* catalog in id order -- the single replacement for what used to
+ * be three separate functions (retag_backlog_batch(),
+ * classify_zero_tag_backlog(), reclassify_general_backlog()), which
+ * independently re-fetched and re-classified overlapping sets of items on
+ * three different schedules.
+ *
+ * Additive, not reconciling -- an earlier version of this function also
+ * DELETED any current taxonomy tag classify_subjects() didn't
+ * independently rediscover from the item's own text. That's wrong for a
+ * tag that came from a trusted external signal rather than keyword
+ * matching (most consequentially, the seed subject slug every API harvest
+ * attaches -- see api_harvest_pubmed() etc): a highly specialized PubMed
+ * abstract routinely contains none of our (necessarily generic) keywords
+ * at all, so that version was quietly stripping real tags and falling
+ * items back to General on every single sweep pass. Confirmed on
+ * production (2026-08-28): PubMed alone was 1,104 of 6,549 General items.
+ * A genuinely wrong tag (like the 'novel'/'treatment' false-positive
+ * keywords found the same week) gets corrected by the deliberate,
+ * evidence-based KEYWORD_REMOVALS pass instead -- that's the right
+ * mechanism for "this specific tag is wrong," not a blind per-item
+ * reconciliation running forever on every sweep tick.
  *
  * Cursor-based ('sweep_cursor_v1' setting), not RAND()-sampled -- this is
  * the direct fix for a real, confirmed production problem: RAND() LIMIT
@@ -1595,15 +1612,31 @@ function sweep_backlog_batch(int $limit, ?float $deadline = null): array {
             }
         }
 
+        // Additive only -- deliberately does NOT strip a current taxonomy
+        // tag just because classify_subjects() doesn't independently
+        // rediscover it from the bare title+abstract text. Confirmed on
+        // production (2026-08-28): this used to also delete any current
+        // taxonomy tag missing from $newMatches, which is correct for a
+        // tag classify_subjects() itself originally added, but wrong for
+        // a tag that came from a trusted EXTERNAL signal instead -- most
+        // consequentially, the seed subject slug every API harvest
+        // function attaches via array_filter([$subjectSlug]) (see
+        // api_harvest_pubmed() etc in this file), which reflects "this is
+        // the subject whose search found this item," not "this text
+        // contains one of this subject's keywords." Highly specialized
+        // PubMed abstracts routinely never contain any of our (necessarily
+        // generic) 'medicine' keywords at all, so this sweep was
+        // repeatedly stripping their one real tag and falling them back
+        // to General -- confirmed via direct query: PubMed alone was 1,104
+        // of 6,549 General items, 642 of which had a real, substantial
+        // abstract classify_subjects() genuinely couldn't match on its
+        // own. A tag that's actually wrong (like the 'novel'/'treatment'
+        // false-positive keywords found the same week) gets corrected by
+        // the deliberate, evidence-based KEYWORD_REMOVALS pass instead --
+        // that is the right mechanism for "this specific tag is wrong,"
+        // not a blind per-item reconciliation on every sweep tick.
         $changed = false;
         $removedTagIds = [];
-        foreach ($currentNonGeneralTaxonomyTags as $t) {
-            if (!in_array($t['slug'], $newMatches, true)) {
-                db()->prepare('DELETE FROM item_tags WHERE item_id = ? AND tag_id = ?')->execute([$lastId, $t['id']]);
-                $removedTagIds[] = $t['id'];
-                $changed = true;
-            }
-        }
         $currentNonGeneralSlugs = array_column($currentNonGeneralTaxonomyTags, 'slug');
         foreach (array_diff($newMatches, $currentNonGeneralSlugs) as $slug) {
             foreach (resolve_tag_ids($slug) as $tagId) {
